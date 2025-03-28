@@ -2,46 +2,53 @@
 
 import os
 import re
-
-# Enhanced version of the insert_oob_assertion script that:
-# - Takes source file, line number, vulnerability name, and instruction
-# - Parses the instruction to extract index variable, element type, and generate the full assertion
-# - Inserts assertion + original instruction before the target line
-# - Writes the instrumented file to 'instrumented_code/'
+import argparse
 
 def parse_instruction(instr_line):
     """
     Parse a C-style array access and assignment like:
       (*OutputBuffer)[i] = (CHAR16)InputBuffer[i];
-
-    Returns:
-      index_var, allocated_size_expr, element_size_expr
+      (*OutputBuffer)[OutIndex++] = 0x1B;
     """
     instr_line = instr_line.strip().rstrip(';')
 
-    pattern = r"\(\*(\w+)\)\[(\w+)\]\s*=\s*\((\w+)\)"
-    match = re.match(pattern, instr_line)
-    if not match:
-        raise ValueError("Unsupported instruction format: " + instr_line)
+    # Case 1: (*OutputBuffer)[OutIndex++] = ...;
+    pattern_esc = r"\(\*(\w+)\)\[(\w+)\+\+\]\s*=\s*.+"
+    match_esc = re.match(pattern_esc, instr_line)
+    if match_esc:
+        buffer_ptr = match_esc.group(1)
+        index_var = match_esc.group(2)
+        return index_var, "*OutputSize", "1", "ESC_BLOCK"
 
-    buffer_ptr = match.group(1)         # OutputBuffer
-    index_var = match.group(2)          # i
-    element_type = match.group(3)       # CHAR16
+    # Case 2: (*OutputBuffer)[i] = (CHAR16)InputBuffer[i];
+    pattern_basic = r"\(\*(\w+)\)\[(\w+)\]\s*=\s*\((\w+)\)"
+    match_basic = re.match(pattern_basic, instr_line)
+    if match_basic:
+        buffer_ptr = match_basic.group(1)
+        index_var = match_basic.group(2)
+        element_type = match_basic.group(3)
+        return index_var, "*OutputSize", f"sizeof({element_type})", "NORMAL"
 
-    allocated_size_expr = f"*OutputSize"
-    element_size_expr = f"sizeof({element_type})"
+    raise ValueError("Unsupported instruction format: " + instr_line)
 
-    return index_var, allocated_size_expr, element_size_expr
 
-def generate_oob_snippet(index_var, allocated_size, element_size, instruction):
+def generate_oob_snippet(index_var, allocated_size, element_size, instruction, mode):
     """
-    Generate a standard KLEE OOB write assertion plus the original instruction.
+    Generate the KLEE OOB assertion and the original instruction.
     """
-    return (
-        "// [OOB_WRITE] Auto-inserted assertion\n"
-        f"klee_assert({index_var} < ({allocated_size} / {element_size})); // OOB check\n"
-        f"{instruction}\n"
-    )
+    if mode == "ESC_BLOCK":
+        return (
+            "// [OOB_WRITE] Auto-inserted assertion for multi-byte ESC sequence\n"
+            f"klee_assert({index_var} + 4 <= {allocated_size}); // Prevents overflow from 4-byte write\n"
+            f"{instruction}\n"
+        )
+    else:
+        return (
+            "// [OOB_WRITE] Auto-inserted assertion\n"
+            f"klee_assert({index_var} < ({allocated_size} / {element_size})); // OOB check\n"
+            f"{instruction}\n"
+        )
+
 
 def insert_assertion(source_file, line_number, vuln_name, instruction):
     if vuln_name != "OOB_WRITE":
@@ -49,11 +56,11 @@ def insert_assertion(source_file, line_number, vuln_name, instruction):
 
     # Parse the affected instruction
     try:
-        index_var, alloc_size, elem_size = parse_instruction(instruction)
+        index_var, alloc_size, elem_size, mode = parse_instruction(instruction)
     except ValueError as e:
         return str(e)
 
-    snippet = generate_oob_snippet(index_var, alloc_size, elem_size, instruction)
+    snippet = generate_oob_snippet(index_var, alloc_size, elem_size, instruction, mode)
 
     if not os.path.isfile(source_file):
         return f"[ERROR] Source file '{source_file}' does not exist."
@@ -65,23 +72,23 @@ def insert_assertion(source_file, line_number, vuln_name, instruction):
     if insert_index < 0 or insert_index > len(lines):
         return f"[ERROR] line_number {line_number} is invalid for file with {len(lines)} lines."
 
+    # Avoid duplicate insertion
+    if "// [OOB_WRITE]" in lines[insert_index - 1]:
+        return f"[!] Assertion already present at line {line_number}, skipping."
+
     lines.insert(insert_index, snippet)
 
     source_dir = os.path.dirname(source_file)
     base_name = os.path.basename(source_file)
     name_part, ext_part = os.path.splitext(base_name)
-
-    # Example: CharConverter_107_OOB_WRITE.c
     out_filename = f"{name_part}_{line_number}_{vuln_name}.c"
     out_path = os.path.join(source_dir, out_filename)
-
 
     with open(out_path, "w", encoding="utf-8") as out_f:
         out_f.writelines(lines)
 
     return f"[+] Inserted assertion at line {line_number} into '{out_path}'."
 
-import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Insert KLEE OOB assertion before a line in source code.")
@@ -100,4 +107,3 @@ if __name__ == "__main__":
     )
 
     print(result)
-

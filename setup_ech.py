@@ -37,10 +37,10 @@ def main():
     write_settings_file(edk2_dir, clang_path, klee_path, max_klee_time)
 
     print("[+] Rewriting #include <...> to #include \"...\"...")
-    #subprocess.run(["python3", "process_headerfiles.py", edk2_dir], check=True)
+    subprocess.run(["python3", "process_headerfiles.py", edk2_dir], check=True)
 
     print("[+] Commenting out STATIC_ASSERT macros...")
-    #subprocess.run(["python3", "comment_out_static_assert.py", edk2_dir], check=True)
+    subprocess.run(["python3", "comment_out_static_assert.py", edk2_dir], check=True)
 
     print("[✓] Environment Configuration Harness (ECH) setup completed successfully.")
 

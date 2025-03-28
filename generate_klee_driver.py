@@ -31,7 +31,10 @@ def generate_klee_driver(entrypoint, source_file, output_name=None):
 
     edk_path = os.path.relpath(edk_path, out_dir)
 
-    code = f"""\n#define __PI_SMM_DRIVER__ 1
+    code = f"""\
+// Auto-generated KLEE driver for {entrypoint}
+#define __PI_SMM_DRIVER__ 1
+
 #include "{edk_path}/MdePkg/Include/Base.h"
 #include "{edk_path}/MdePkg/Include/Uefi/UefiBaseType.h"
 #include "{edk_path}/MdePkg/Include/Uefi/UefiSpec.h"
@@ -65,17 +68,46 @@ def generate_klee_driver(entrypoint, source_file, output_name=None):
 #include <stdlib.h>
 {header_line}
 
-// Stubbed EFI System Table and Image Handle
+// Stubbed global variables
 EFI_SYSTEM_TABLE gSysTable;
+EFI_SYSTEM_TABLE *gST = &gSysTable;
 EFI_HANDLE gImageHandle = (EFI_HANDLE)0;
 
-// Stubbed Driver Services Table
+// Common protocol GUIDs (declared to satisfy global initializations)
+EFI_GUID gEfiSmmLegacyCommGuid, gEdkiiSmmMemoryAttributeProtocolGuid, gEfiSmmLegacyProtocolGuid, gEfiSmmLegacyVariableGuid, gEfiSmmFaultTolerantWriteProtocolGuid, gEfiSmmFirmwareVolumeBlockProtocolGuid, gEfiSmmVariableProtocolGuid,gEdkiiSmmVarCheckProtocolGuid,gEfiMmEndOfDxeProtocolGuid, gEfiSmmLockBoxCommunicationGuid,gEfiSmmReadyToLockProtocolGuid,gEfiLockBoxProtocolGuid,gEfiMemoryAttributesTableGuid,gEfiSmmAccess2ProtocolGuid,gEfiSmmEndOfDxeProtocolGuid,gEfiSmmSwapAddressRangeProtocolGuid,gEfiTcg2ProtocolGuid,gEfiTcgProtocolGuid,gSmmVariableWriteGuid,gEfiQueryVariableInfoCommGuid, gEfiQueryVariableInfoProtocolGuid,gEfiCallerIdGuid,gEdkiiMemoryProfileGuid,gEfiPeiSmmCommunicationPpiGuid,gEfiSmmSwDispatch2ProtocolGuid, gEfiMemoryOverwriteControlDataGuid, gEfiTpmDeviceInstanceTpm20DtpmGuid, gTpmNvsMmGuid, gEfiMmReadyToLockProtocolGuid,
+gEfiEventDxeDispatchGuid, gEfiDxeSmmReadyToLockProtocolGuid, gEfiEventLegacyBootGuid, gEfiEventExitBootServicesGuid,
+gEfiEventReadyToBootGuid, gEfiEndOfDxeEventGroupGuid, gEdkiiS3SmmInitDoneGuid, gEdkiiEndOfS3ResumeGuid, gEdkiiSmmLegacyBootProtocolGuid,
+gEdkiiSmmExitBootServicesProtocolGuid,gEdkiiSmmReadyToBootProtocolGuid,gEfiSmmCpuIo2ProtocolGuid,gEfiSmmSxDispatch2ProtocolGuid,
+gEfiLoadedImageProtocolGuid,gEfiFirmwareVolume2ProtocolGuid, gEfiSecurity2ArchProtocolGuid, gEfiSecurityArchProtocolGuid,
+gEfiDevicePathProtocolGuid,gAprioriGuid,gEdkiiSmmMemoryProfileGuid, gEfiSmmCommunicationProtocolGuid, gEfiSmmCommunicationProtocolGuid,
+gEfiSmmCommunicationProtocolGuid,gEdkiiPiSmmCommunicationRegionTableGuid,gEfiMemoryOverwriteRequestControlLockGuid,gEfiGlobalVariableGuid,gEfiHardwareErrorVariableGuid,
+gEfiSmmVariableProtocolGuid,gEfiRWVariableProtocolGuid,gEfiRWVariableCommGuid,gEfiMmAccessProtocolGuid, gEfiAccessRWVarProtocolGuid, gZeroGuid, gEfiHardwareLicenseProtocolGuid,
+gEfiFanControllerProtocolGuid, gEfiLedControllerProtocolGuid, gEfiThermalSensorProtocolGuid, gEfiHardwareHandlerReadyProtocolGuid, gEfiSmmAccess2ProtocolGuid, gEfiMemoryAttributesTableGuid, gZeroGuid, gEfiSmmVariableProtocolGuid, gEfiSmmCommunicationProtocolGuid, gEfiTcg2ProtocolGuid,
+gEfiSmmEndOfDxeProtocolGuid;
+
+// Services Tables
 EFI_DXE_SERVICES *gDS = NULL;
 EFI_BOOT_SERVICES *gBS = NULL;
 EFI_RUNTIME_SERVICES *gRT = NULL;
-EFI_SYSTEM_TABLE *gST = NULL;
 
+// Additional globals
+EFI_PHYSICAL_ADDRESS  gLoadModuleAtFixAddressSmramBase;
+EFI_LOADED_IMAGE_PROTOCOL *mSmmCoreLoadedImage;
+EFI_SMRAM_DESCRIPTOR *mFullSmramRanges;
+VARIABLE_MODULE_GLOBAL *mVariableModuleGlobal;
+VARIABLE_INFO_ENTRY *gVariableInfo = NULL;
+EFI_FIRMWARE_VOLUME_HEADER *mNvFvHeaderCache = NULL;
+EFI_IPv4_ADDRESS mZeroIp4Addr;
+LIST_ENTRY mSmmMemoryMap;
+UINTN mFullSmramRangeCount;
+VARIABLE_MODULE_GLOBAL  *mVariableModuleGlobal;
+VARIABLE_STORE_HEADER  *mNvVariableCache = NULL;
+EFI_IPv4_ADDRESS  mZeroIp4Addr;
 
+// Enum stub
+VAR_CHECK_REQUEST_SOURCE mRequestSource = VarCheckFromUntrusted;
+
+// Minimal memory functions
 VOID *EFIAPI ZeroMem(VOID *Buffer, UINTN Size) {{
     return memset(Buffer, 0, Size);
 }}
@@ -99,6 +131,7 @@ EFI_STATUS EFIAPI AsciiStrCpyS(CHAR8 *Dest, UINTN DestSize, CONST CHAR8 *Src) {{
     return EFI_SUCCESS;
 }}
 
+// SMM memory services mock
 EFI_STATUS EFIAPI MySmmAllocatePool(
     IN EFI_MEMORY_TYPE PoolType,
     IN UINTN Size,
@@ -115,11 +148,13 @@ EFI_SMM_SYSTEM_TABLE2 gSmstMock = {{
     .SmmAllocatePool = MySmmAllocatePool,
     .SmmInstallProtocolInterface = NULL
 }};
-
 EFI_SMM_SYSTEM_TABLE2 *gSmst = &gSmstMock;
 
+
+// Main function to invoke entrypoint
+
 int main() {{
-    {entrypoint}(gImageHandle, &gSysTable);
+    {entrypoint}(gImageHandle, gST);
     return 0;
 }}
 """

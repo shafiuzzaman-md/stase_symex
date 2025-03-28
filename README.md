@@ -1,12 +1,12 @@
 # STASE Analysis Workflow
 
-This repository implements a streamlined pipeline for symbolic vulnerability analysis using **STASE** (Static Analysis guided Symbolic Execution) over UEFI firmware modules.
+This repository implements symbolic eexution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) in UEFI modules.
 
 ---
 
 ## Input
 
-- Source code directory under analysis (must be a clone of EDK2 or compatible testcases)
+- Source code directory under analysis (must be a clone of EDK2)
 - Entry point and vulnerable instruction location: From static analysis
 - Assertion template: Derived for vulnerability type (e.g., OOB_WRITE)
 
@@ -26,7 +26,7 @@ python3 setup_ech.py <edk2-directory> <clang-path> <klee-path> [max-klee-time]
 ```
 Example:
 ```
-python3 setup_ech.py ../edk2-testcases /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee 5
 ```
 This script will:
 
@@ -49,9 +49,10 @@ Run once per assertion (generated via static analysis)
 ```
 python3 run_analysis.py \
   ../edk2-testcases/Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  107 \
+  146 \
   OOB_WRITE \
-  "(*OutputBuffer)[i] = (CHAR16)InputBuffer[i];"
+  "(*OutputBuffer)[OutIndex++] = 0x1B;"
+
 ```
  What this does:
 - Checks if the assertion is already inserted
