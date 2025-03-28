@@ -12,7 +12,6 @@ def get_header_from_source(source_file, output_dir):
 def find_edk_root(path):
     if os.path.isfile(path):
         path = os.path.dirname(path)
-
     path = os.path.abspath(path)
     while path != "/" and not any(name.lower().startswith("mdepkg") for name in os.listdir(path)):
         path = os.path.dirname(path)
@@ -32,15 +31,13 @@ def generate_klee_driver(entrypoint, source_file, output_name=None):
 
     edk_path = os.path.relpath(edk_path, out_dir)
 
-    code = f"""\
-#define __PI_SMM_DRIVER__ 1
+    code = f"""\n#define __PI_SMM_DRIVER__ 1
 #include "{edk_path}/MdePkg/Include/Base.h"
 #include "{edk_path}/MdePkg/Include/Uefi/UefiBaseType.h"
 #include "{edk_path}/MdePkg/Include/Uefi/UefiSpec.h"
 #include "{edk_path}/MdePkg/Include/Pi/PiSmmCis.h"
 #include "{edk_path}/MdePkg/Include/Protocol/SmmBase2.h"
 #include "{edk_path}/MdePkg/Include/Library/SmmServicesTableLib.h"
-
 
 #include "{edk_path}/MdePkg/Include/Uefi/UefiMultiPhase.h"
 #include "{edk_path}/BaseTools/Source/C/Include/Common/PiFirmwareVolume.h"
@@ -71,6 +68,13 @@ def generate_klee_driver(entrypoint, source_file, output_name=None):
 // Stubbed EFI System Table and Image Handle
 EFI_SYSTEM_TABLE gSysTable;
 EFI_HANDLE gImageHandle = (EFI_HANDLE)0;
+
+// Stubbed Driver Services Table
+EFI_DXE_SERVICES *gDS = NULL;
+EFI_BOOT_SERVICES *gBS = NULL;
+EFI_RUNTIME_SERVICES *gRT = NULL;
+EFI_SYSTEM_TABLE *gST = NULL;
+
 
 VOID *EFIAPI ZeroMem(VOID *Buffer, UINTN Size) {{
     return memset(Buffer, 0, Size);
