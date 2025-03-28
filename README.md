@@ -19,14 +19,14 @@ This repository implements a streamlined pipeline for symbolic vulnerability ana
 
 ## Phase 1: Environment Configuration Harnesses (ECH)
 
-Run **once** to set up the environment, prepare headers, and disable static assertions.
+Run **once** to set up the environment.
 
 ```
-python3 setup_ech.py <edk2-directory> <clang-path> <klee-path>
+python3 setup_ech.py <edk2-directory> <clang-path> <klee-path> [max-klee-time]
 ```
 Example:
 ```
-python3 setup_ech.py ../edk2-testcases /usr/lib/llvm-14/bin/clang /home/shafi/klee/build/bin/klee
+python3 setup_ech.py ../edk2-testcases /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
 This script will:
 
@@ -34,7 +34,15 @@ This script will:
 
 - Comment out all STATIC_ASSERT() statements
 
-- Save configuration in settings.py
+- Save the configuration into a generated settings.py file containing:
+
+ - Absolute path to the EDK2 source directory
+
+ - Path to Clang compiler
+
+ - Path to the KLEE binary
+
+ - Optional: KLEE timeout (default: 5 seconds)
 
 ## Phase 2: Path Exploration Harnesses (PEH)
 Run once per assertion (generated via static analysis)
