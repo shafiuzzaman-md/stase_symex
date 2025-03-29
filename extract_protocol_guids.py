@@ -3,6 +3,7 @@
 import os
 import re
 import sys
+import yaml
 
 GUID_PATTERN = re.compile(r'\b(g[A-Z][A-Za-z0-9_]*Guid)\b')
 GLOBAL_VAR_PATTERN = re.compile(
@@ -10,13 +11,20 @@ GLOBAL_VAR_PATTERN = re.compile(
     re.MULTILINE
 )
 
-# Types to reject or avoid
-TYPE_BLACKLIST = re.compile(r'\b(return|STATIC|delete|UNKNOWN|CVfr|ENV_VAR_LIST|SHELL_MAP_LIST|PLD_|FWB_|FV_|OPTIONS|COMPILER_RUN_STATUS|USB_CLASS_FORMAT|ACPI_BOARD_INFO|EFI_ISCSI_|EFI_AUTHENTICATION_INFO|EFI_QUESION_TYPE|EFI_TLS|EFI_MM_|EFI_DHCP6_PROTOCOL|EFI_VARSTORE_INFO|EFI_TCP|EFI_IP4_PROTOCOL|EFI_VFR_|EFI_VFR_VARSTORE_TYPE|EFI_SERVICE_BINDING_PROTOCOL)\b')
+TYPE_BLACKLIST = re.compile(
+    r'\b(return|STATIC|delete|UNKNOWN|CVfr|ENV_VAR_LIST|SHELL_MAP_LIST|PLD_|FWB_|FV_|OPTIONS|COMPILER_RUN_STATUS|'
+    r'USB_CLASS_FORMAT|ACPI_BOARD_INFO|EFI_ISCSI_|EFI_AUTHENTICATION_INFO|EFI_QUESION_TYPE|EFI_TLS|EFI_MM_|'
+    r'EFI_DHCP6_PROTOCOL|EFI_VARSTORE_INFO|EFI_TCP|EFI_IP4_PROTOCOL|EFI_VFR_|EFI_VFR_VARSTORE_TYPE|'
+    r'EFI_SERVICE_BINDING_PROTOCOL)\b'
+)
 
-# Types we know exist
 TYPE_WHITELIST = {
     "EFI_GUID", "EFI_HANDLE", "EFI_SYSTEM_TABLE", "EFI_BOOT_SERVICES", "EFI_RUNTIME_SERVICES",
     "CHAR16", "BOOLEAN", "UINT8", "UINT16", "UINT32", "UINT64", "LIST_ENTRY", "VOID*"
+}
+
+SKIP_GLOBAL_DEFINITIONS = {
+    "mSmmMemLibInternalMaximumSupportAddress",
 }
 
 COMMON_INCLUDES = [
@@ -48,13 +56,17 @@ COMMON_INCLUDES = [
     "MdeModulePkg/Include/Protocol/SmmVariable.h",
 ]
 
+def load_manual_definitions(path="manual_globals.yaml"):
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        data = yaml.safe_load(f)
+        return data.get("manual_globals", {})
+
 def is_valid_type(type_str):
     if TYPE_BLACKLIST.search(type_str):
         return False
-    for allowed in TYPE_WHITELIST:
-        if allowed in type_str:
-            return True
-    return False
+    return any(allowed in type_str for allowed in TYPE_WHITELIST)
 
 def extract_symbols_from_edk2(edk2_dir):
     guids = set()
@@ -70,93 +82,91 @@ def extract_symbols_from_edk2(edk2_dir):
             try:
                 with open(path, encoding="utf-8", errors="ignore") as f:
                     content = f.read()
-                    guids.update(GUID_PATTERN.findall(content))
-                    for match in GLOBAL_VAR_PATTERN.findall(content):
-                        decl_type, name = match
-                        decl_type = decl_type.strip()
-                        if is_valid_type(decl_type):
+
+                    guids.update(set(g.strip() for g in GUID_PATTERN.findall(content)))
+
+                    for decl_type, name in GLOBAL_VAR_PATTERN.findall(content):
+                        decl_type = ' '.join(decl_type.strip().split())
+                        if is_valid_type(decl_type) and name not in globals:
                             globals[name] = decl_type
             except Exception as e:
                 print(f"[!] Failed to process {path}: {e}")
-    return sorted(guids), globals
+
+    manual_defs = load_manual_definitions()
+    globals.update({k: v.split()[0] + ' ' + ' '.join(v.split()[1:-2]) for k, v in manual_defs.items() if k not in globals})
+
+    return sorted(guids), globals, manual_defs
+
 def write_stubs(edk2_dir, header_path="generated_klee_drivers/global_stubs.h", def_path="generated_klee_drivers/global_stub_defs.c"):
     os.makedirs(os.path.dirname(header_path), exist_ok=True)
 
-    guids, globals = extract_symbols_from_edk2(edk2_dir)
+    guids, globals, manual_defs = extract_symbols_from_edk2(edk2_dir)
 
-    # ✅ Ensure essential UEFI globals are always defined
-    essential_globals = {
-        "gDS": "EFI_DXE_SERVICES *",
-        "gBS": "EFI_BOOT_SERVICES *",
-        "gRT": "EFI_RUNTIME_SERVICES *",
-        "gST": "EFI_SYSTEM_TABLE *",
-        "gImageHandle": "EFI_HANDLE"
-    }
-    for name, typ in essential_globals.items():
-        globals.setdefault(name, typ)
-
-    with open(header_path, "w") as h:
-        h.write("// Auto-generated global stub declarations\n")
-        h.write("#ifndef __GLOBAL_STUBS_H__\n#define __GLOBAL_STUBS_H__\n\n")
-        h.write('#include <Uefi.h>\n#include <Library/UefiLib.h>\n\n')
-
-        for g in guids:
-            h.write(f"extern EFI_GUID {g};\n")
-
-        h.write("\n// Global variable stubs\n")
-        for name, decl_type in globals.items():
-            h.write(f"extern {decl_type} {name};\n")
-
-        h.write("\n#endif // __GLOBAL_STUBS_H__\n")
-
-    with open(def_path, "w") as d:
-        d.write("// Auto-generated global stub definitions\n")
-        d.write('#include "global_stubs.h"\n\n')
-        for name, decl_type in globals.items():
-            init = " = 0" if "*" not in decl_type else " = NULL"
-            d.write(f"{decl_type} {name}{init};\n")
-
-        for g in guids:
-            d.write(f"EFI_GUID {g} = {{0}};\n")
-
-    print(f"[✓] Wrote {header_path} and {def_path} with {len(guids)} GUIDs and {len(globals)} globals.")
-
-    os.makedirs(os.path.dirname(header_path), exist_ok=True)
-
-    guids, globals = extract_symbols_from_edk2(edk2_dir)
-    
     with open(header_path, "w") as h:
         h.write("// Auto-generated global stub declarations\n")
         h.write("#ifndef __GLOBAL_STUBS_H__\n#define __GLOBAL_STUBS_H__\n\n")
         for inc in COMMON_INCLUDES:
-            full = os.path.normpath(os.path.join(edk2_dir, inc))
-            rel = os.path.relpath(full, os.path.dirname(header_path))
+            rel = os.path.relpath(os.path.join(edk2_dir, inc), os.path.dirname(header_path))
             h.write(f'#include "{rel}"\n')
-        h.write("\n")
-
-        h.write("// GUID declarations\n")
-        for g in guids:
+        h.write("\n// GUID declarations\n")
+        for g in sorted(set(guids)):
             h.write(f"extern EFI_GUID {g};\n")
-
         h.write("\n// Global variable stubs\n")
         for name, decl_type in globals.items():
-            h.write(f"extern {decl_type} {name};\n")
-
+            h.write(f"extern {decl_type.strip()};\n")
         h.write("\n#endif // __GLOBAL_STUBS_H__\n")
 
     with open(def_path, "w") as d:
         d.write("// Auto-generated global stub definitions\n")
         d.write('#include "global_stubs.h"\n\n')
-        for name, decl_type in globals.items():
-            init = " = 0" if "*" not in decl_type else " = NULL"
-            d.write(f"{decl_type} {name}{init};\n")
-        for g in guids:
-            d.write(f"EFI_GUID {g} = {{0}};\n")
 
-    print(f"[✓] Wrote {header_path} and {def_path} with {len(guids)} GUIDs and {len(globals)} globals.")
+        STRUCT_LIKE_TYPES = {
+            "EFI_GUID", "LIST_ENTRY", "EFI_SYSTEM_TABLE", "EFI_BOOT_SERVICES", "EFI_RUNTIME_SERVICES"
+        }
+
+        for line in manual_defs.values():
+            d.write(line + "\n")
+
+        for name, decl_type in globals.items():
+            if name in manual_defs or name in SKIP_GLOBAL_DEFINITIONS:
+                print(f"[!] Skipping manual or duplicate global: {name}")
+                continue
+
+            clean_type = decl_type.replace("extern", "").strip()
+            if any(t in clean_type for t in STRUCT_LIKE_TYPES):
+                init = " = {0}"
+            elif "*" in clean_type:
+                init = " = NULL"
+            else:
+                init = " = 0"
+            d.write(f"{clean_type} {name}{init};\n")
+
+        written_guids = set()
+        for g in sorted(guids):
+            if g not in written_guids:
+                d.write(f"EFI_GUID {g} = {{0}};\n")
+                written_guids.add(g)
+
+    print(f"[✓] Wrote {header_path} and {def_path} with {len(written_guids)} GUIDs and {len(globals)} globals.")
+
+def deduplicate_file(file_path):
+    seen = set()
+    deduped_lines = []
+
+    with open(file_path, 'r') as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped and stripped not in seen:
+                deduped_lines.append(line)
+                seen.add(stripped)
+
+    with open(file_path, 'w') as f:
+        f.writelines(deduped_lines)
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python3 extract_protocol_guids.py <edk2-root-dir>")
         sys.exit(1)
     write_stubs(sys.argv[1])
+    deduplicate_file('generated_klee_drivers/global_stubs.h')
+    deduplicate_file('generated_klee_drivers/global_stub_defs.c')

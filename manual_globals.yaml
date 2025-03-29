@@ -1,0 +1,11 @@
+manual_globals:
+  gDS: "EFI_DXE_SERVICES * gDS = NULL;"
+  gBS: "EFI_BOOT_SERVICES * gBS = NULL;"
+  gRT: "EFI_RUNTIME_SERVICES * gRT = NULL;"
+  gST: "EFI_SYSTEM_TABLE * gST = NULL;"
+  gImageHandle: "EFI_HANDLE gImageHandle = NULL;"
+  gSmst: "EFI_SMM_SYSTEM_TABLE2 * gSmst = NULL;"
+  mVariableModuleGlobal: "VARIABLE_MODULE_GLOBAL * mVariableModuleGlobal = NULL;"
+  mNvVariableCache: "VARIABLE_STORE_HEADER * mNvVariableCache = NULL;"
+  mNvFvHeaderCache: "EFI_FIRMWARE_VOLUME_HEADER * mNvFvHeaderCache = NULL;"
+  mZeroIp4Addr: "EFI_IPv4_ADDRESS * mZeroIp4Addr = NULL;"

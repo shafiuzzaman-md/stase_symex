@@ -42,6 +42,9 @@ def main():
     print("[+] Commenting out STATIC_ASSERT macros...")
     subprocess.run(["python3", "comment_out_static_assert.py", edk2_dir], check=True)
 
+    print("[+] Extracting GUIDs and global stubs...")
+    subprocess.run(["python3", "extract_protocol_guids.py", edk2_dir], check=True)
+    
     print("[✓] Environment Configuration Harness (ECH) setup completed successfully.")
 
 if __name__ == "__main__":

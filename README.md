@@ -1,6 +1,6 @@
-# STASE Analysis Workflow
+# STASE Symbolic Execution Workflow
 
-This repository implements symbolic eexution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) in UEFI modules.
+This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) in UEFI modules.
 
 ---
 
