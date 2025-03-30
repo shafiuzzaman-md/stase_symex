@@ -48,7 +48,7 @@ This script will:
 Run once per assertion (generated via static analysis)
 ```
 python3 run_analysis.py \
-  ../edk2-testcases/Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  ../edk2-testcases-main/Testcases/Sample2Tests/CharConverter/CharConverter.c \
   146 \
   OOB_WRITE \
   "(*OutputBuffer)[OutIndex++] = 0x1B;"

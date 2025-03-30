@@ -18,6 +18,7 @@ base_name = os.path.splitext(os.path.basename(source_file))[0]
 entrypoint = base_name + "EntryPoint"
 
 instrumented_file = f"{os.path.splitext(source_file)[0]}_{line_number}_{vuln_type}.c"
+print(instrumented_file);
 driver_file = f"generated_klee_drivers/klee_driver_{entrypoint}.c"
 bitcode_file = f"klee_driver_{entrypoint}.bc"
 
@@ -27,8 +28,8 @@ if not os.path.exists(instrumented_file):
 else:
     print("[✓] Assertion already inserted.")
 
-print("[+] Generating KLEE driver...")
-subprocess.run(["python3", "generate_klee_driver.py", entrypoint, source_file], check=True)
+print("[+] Generating KLEE driver from instrumented file...")
+subprocess.run(["python3", "generate_klee_driver.py", entrypoint, instrumented_file], check=True)
 
 print("[+] Compiling LLVM bitcode...")
 subprocess.run([
