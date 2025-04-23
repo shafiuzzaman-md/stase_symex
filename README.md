@@ -1,12 +1,12 @@
 # STASE Symbolic Execution Workflow
 
-This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) in UEFI modules.
+This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) .
 
 ---
 
 ## Input
 
-- Source code directory under analysis (must be a clone of EDK2)
+- Source code directory under analysis
 - Entry point and vulnerable instruction location: From static analysis
 - Assertion template: Derived for vulnerability type (e.g., OOB_WRITE)
 
@@ -19,7 +19,7 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 
 ## Phase 1: Environment Configuration Harnesses (ECH)
 
-Run **once** to set up the environment.
+Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
 ```
 python3 setup_ech.py <edk2-directory> <clang-path> <klee-path>
@@ -30,9 +30,11 @@ python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/sha
 ```
 This script will:
 
+- Copy the entire source tree into stase_generated/instrumented_source/
+
 - Rewrite #include <...> to #include "..." with full relative paths
 
-- Comment out all STATIC_ASSERT() statements
+- Comment out all STATIC_ASSERT() macros
 
 - Extract all protocol GUIDs and global symbols to:
   - global_stubs.h: contains extern declarations and shared includes
@@ -40,21 +42,23 @@ This script will:
 
 - Generate a settings.py file containing:
 
- - Absolute path to the EDK2 source directory
+ - Absolute path to instrumented source
 
  - Path to Clang compiler
 
  - Path to the KLEE binary
+
 All generated files, modified source code, and configuration will be stored under stase_generated/.
 
 ## Phase 2: Path Exploration Harnesses (PEH)
-Run once per assertion (generated via static analysis)
+Run once per assertion (generated via static analysis). You must provide the relative path, and also specify the KLEE timeout.
 ```
 python3 run_analysis.py \
-  ../edk2-testcases-main/Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  Testcases/Sample2Tests/CharConverter/CharConverter.c \
   146 \
   OOB_WRITE \
-  "(*OutputBuffer)[OutIndex++] = 0x1B;"
+  "(*OutputBuffer)[OutIndex++] = 0x1B;" \
+  5
 
 ```
  What this does:
