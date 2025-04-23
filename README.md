@@ -22,27 +22,30 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 Run **once** to set up the environment.
 
 ```
-python3 setup_ech.py <edk2-directory> <clang-path> <klee-path> [max-klee-time]
+python3 setup_ech.py <edk2-directory> <clang-path> <klee-path>
 ```
 Example:
 ```
-python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee 5
+python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
 This script will:
 
-- Rewrite all #include <...> to absolute #include "..." paths for compatibility
+- Rewrite #include <...> to #include "..." with full relative paths
 
 - Comment out all STATIC_ASSERT() statements
 
-- Save the configuration into a generated settings.py file containing:
+- Extract all protocol GUIDs and global symbols to:
+  - global_stubs.h: contains extern declarations and shared includes
+  - global_stub_defs.c: contains stub definitions with zeroed initializations
+
+- Generate a settings.py file containing:
 
  - Absolute path to the EDK2 source directory
 
  - Path to Clang compiler
 
  - Path to the KLEE binary
-
- - Optional: KLEE timeout (default: 5 seconds)
+All generated files, modified source code, and configuration will be stored under stase_generated/.
 
 ## Phase 2: Path Exploration Harnesses (PEH)
 Run once per assertion (generated via static analysis)

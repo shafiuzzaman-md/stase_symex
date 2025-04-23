@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import yaml
+import argparse
 
 GUID_PATTERN = re.compile(r'\b(g[A-Z][A-Za-z0-9_]*Guid)\b')
 GLOBAL_VAR_PATTERN = re.compile(
@@ -97,8 +98,10 @@ def extract_symbols_from_edk2(edk2_dir):
 
     return sorted(guids), globals, manual_defs
 
-def write_stubs(edk2_dir, header_path="generated_klee_drivers/global_stubs.h", def_path="generated_klee_drivers/global_stub_defs.c"):
-    os.makedirs(os.path.dirname(header_path), exist_ok=True)
+def write_stubs(edk2_dir, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    header_path = os.path.join(out_dir, "global_stubs.h")
+    def_path = os.path.join(out_dir, "global_stub_defs.c")
 
     guids, globals, manual_defs = extract_symbols_from_edk2(edk2_dir)
 
@@ -113,12 +116,12 @@ def write_stubs(edk2_dir, header_path="generated_klee_drivers/global_stubs.h", d
             h.write(f"extern EFI_GUID {g};\n")
         h.write("\n// Global variable stubs\n")
         for name, decl_type in globals.items():
-            h.write(f"extern {decl_type.strip()};\n")
+            h.write(f"extern {decl_type.strip()} {name};\n")
         h.write("\n#endif // __GLOBAL_STUBS_H__\n")
 
     with open(def_path, "w") as d:
         d.write("// Auto-generated global stub definitions\n")
-        d.write('#include "global_stubs.h"\n\n')
+        d.write(f'#include "{os.path.basename(header_path)}"\n\n')
 
         STRUCT_LIKE_TYPES = {
             "EFI_GUID", "LIST_ENTRY", "EFI_SYSTEM_TABLE", "EFI_BOOT_SERVICES", "EFI_RUNTIME_SERVICES"
@@ -164,9 +167,11 @@ def deduplicate_file(file_path):
         f.writelines(deduped_lines)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python3 extract_protocol_guids.py <edk2-root-dir>")
-        sys.exit(1)
-    write_stubs(sys.argv[1])
-    deduplicate_file('generated_klee_drivers/global_stubs.h')
-    deduplicate_file('generated_klee_drivers/global_stub_defs.c')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("edk2_root_dir")
+    parser.add_argument("--out-dir", default="generated_klee_drivers")
+    args = parser.parse_args()
+
+    write_stubs(args.edk2_root_dir, args.out_dir)
+    deduplicate_file(os.path.join(args.out_dir, "global_stubs.h"))
+    deduplicate_file(os.path.join(args.out_dir, "global_stub_defs.c"))
