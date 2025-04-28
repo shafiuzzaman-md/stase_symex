@@ -13,7 +13,7 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
     - Entry point invocation
 - Assertion expression to inject (derived from vulnerability type, e.g., OOB_WRITE)
 - Assertion line number in the target source file
-- Symbolic execution timeout
+- Symbolic execution timeout (optional)
 ---
 
 ## Output
@@ -21,7 +21,7 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 
 ---
 
-## Phase 1: Setup Phase
+## Step 1: Setup Environment
 
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
@@ -49,8 +49,40 @@ This script will:
 
 - Create a settings.py containing paths to Clang, KLEE, and source
 
-## Phase 2: Analysis Phase:
-Run once for each vulnerability identified by static analysis.
+## Step 2: Setup Driver
+Run once for each vulnerability to generate an initial driver template.
+```
+python3 staseplusplus/setup_driver.py \
+  <entrypoint_name> \
+  <vulnerability_type> \
+  <assertion_line_number> \
+  <target_source_file_relative_to_source_dir>
+```
+Example:
+```
+python3 staseplusplus/setup_driver.py \
+  CharConverter \
+  OOB_WRITE \
+  146 \
+  Testcases/Sample2Tests/CharConverter/CharConverter.c
+```
+This script will:
+- Create a driver skeleton under inputs/ named:
+```
+klee_driver_<EntryPointName>_<VulnerabilityType>_<LineNumber>.c
+
+```
+For example:
+```
+inputs/klee_driver_CharConverter_OOB_WRITE_146.c
+```
+
+### After Driver Generation: Manual Steps
+- Mark all attacker-controlled variables as symbolic (using klee_make_symbolic)
+- Add any custom stub initialization if needed
+
+## Step 3: Run Analysis
+Once the driver is ready, run run_analysis.py to insert the assertion, compile, and start symbolic execution.
 
 ```
 python3 staseplusplus/run_analysis.py \
@@ -58,9 +90,10 @@ python3 staseplusplus/run_analysis.py \
   <target_source_file_relative_to_source_dir> \
   <assertion_line_number> \
   <assertion_expression> \
-  <max_klee_time_seconds>
+   [<max_klee_time_seconds>]
 
 ```
+Note: The last argument <max_klee_time_seconds> is optional. If omitted, it will default to 5 seconds.
 
 Example:
 ```
@@ -69,36 +102,39 @@ python3 run_analysis.py \
   Testcases/Sample2Tests/CharConverter/CharConverter.c \
   146 \
   "klee_assert(j <= last);" \
-  5
+  10
 
 
 ```
- Where::
+What this does:
 - Inserts the assertion at the specified line in the target source file
 
 - Loads the driver.c file
 
 - Compiles the driver together with stubs into LLVM bitcode
 
-- Runs KLEE symbolic execution for the specified timeout
+- Runs KLEE symbolic execution with the specified (or default) timeout.
 
 ##  Project Layout
 ```
 project_root/
 ├── staseplusplus/
-│   ├── run_analysis.py
 │   ├── setup_environment.py
-│   ├── (other scripts)
+│   ├── setup_driver.py
+│   ├── run_analysis.py
+│   ├── (other helper scripts)
 ├── stase_generated/
 │   ├── instrumented_source/
 │   │   ├── (copied + instrumented source tree)
 │   ├── generated_klee_drivers/
-│   │   ├── klee_driver_CharConverter_OOB_WRITE_assert.c
+│   │   ├── 
 │   ├── global_stubs.h
 │   ├── global_stub_defs.c
 │   ├── driver_stubs.c
 │   ├── settings.py
 ├── inputs/
-│   ├── klee_driver.c  
+│   ├── klee_driver_template.c   <-- (example driver)
+│   ├── (user-prepared drivers here)
 ├── (user's original source code placed anywhere)
+
 ```
