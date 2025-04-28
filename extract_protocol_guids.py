@@ -94,7 +94,9 @@ def extract_symbols_from_edk2(edk2_dir):
                 print(f"[!] Failed to process {path}: {e}")
 
     manual_defs = load_manual_definitions()
-    globals.update({k: v.split()[0] + ' ' + ' '.join(v.split()[1:-2]) for k, v in manual_defs.items() if k not in globals})
+    for k, v in manual_defs.items():
+        if k not in globals:
+            globals[k] = v.split()[0] + ' ' + ' '.join(v.split()[1:-2])
 
     return sorted(guids), globals, manual_defs
 
@@ -116,7 +118,10 @@ def write_stubs(edk2_dir, out_dir):
             h.write(f"extern EFI_GUID {g};\n")
         h.write("\n// Global variable stubs\n")
         for name, decl_type in globals.items():
-            h.write(f"extern {decl_type.strip()} {name};\n")
+            clean_type = decl_type.strip()
+            if name in clean_type:
+                clean_type = clean_type.replace(name, '').strip()
+            h.write(f"extern {clean_type} {name};\n")
         h.write("\n#endif // __GLOBAL_STUBS_H__\n")
 
     with open(def_path, "w") as d:
@@ -136,6 +141,9 @@ def write_stubs(edk2_dir, out_dir):
                 continue
 
             clean_type = decl_type.replace("extern", "").strip()
+            if name in clean_type:
+                clean_type = clean_type.replace(name, '').strip()
+
             if any(t in clean_type for t in STRUCT_LIKE_TYPES):
                 init = " = {0}"
             elif "*" in clean_type:
@@ -154,17 +162,15 @@ def write_stubs(edk2_dir, out_dir):
 
 def deduplicate_file(file_path):
     seen = set()
-    deduped_lines = []
-
     with open(file_path, 'r') as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped and stripped not in seen:
-                deduped_lines.append(line)
-                seen.add(stripped)
+        lines = f.readlines()
 
     with open(file_path, 'w') as f:
-        f.writelines(deduped_lines)
+        for line in lines:
+            stripped = line.strip()
+            if stripped and stripped not in seen:
+                f.write(line)
+                seen.add(stripped)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

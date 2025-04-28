@@ -10,31 +10,33 @@ from settings import CLANG_PATH, KLEE_PATH, EDK2_PATH
 
 OUT_DIR = "../stase_generated"
 DRIVER_DIR = os.path.join(OUT_DIR, "generated_klee_drivers")
+INSTRUMENTED_DIR = os.path.join(OUT_DIR, "instrumented_source")
 STUB_HEADER = os.path.join(OUT_DIR, "global_stubs.h")
 STUB_DEF = os.path.join(OUT_DIR, "global_stub_defs.c")
-DRIVER_STUBS = os.path.join(OUT_DIR, "driver_stubs.c")
 
-if len(sys.argv) != 6:
-    print("Usage: python3 run_analysis.py <driver_template.c> <target_source_file.c> <assertion_line_number> <assertion_expression> <max_klee_time>")
+# Parse input arguments
+if len(sys.argv) not in [5, 6]:
+    print("Usage: python3 staseplusplus/run_analysis.py <driver.c> <target_source_file.c> <assertion_line_number> <assertion_expression> [<max_klee_time_seconds>]")
     sys.exit(1)
 
 input_driver = sys.argv[1]
-target_source = sys.argv[2]
+target_source_rel = sys.argv[2]
 assertion_line = int(sys.argv[3])
 assertion_text = sys.argv[4]
-MAX_KLEE_TIME = int(sys.argv[5])
+MAX_KLEE_TIME = int(sys.argv[5]) if len(sys.argv) == 6 else 5  # Default 5 seconds
 
-# Full path to the source file
-source_file = os.path.join(EDK2_PATH, target_source)
+# Paths
+source_file = os.path.join(EDK2_PATH, target_source_rel)
+driver_base = os.path.splitext(os.path.basename(input_driver))[0]
+driver_obj = os.path.join(DRIVER_DIR, f"{driver_base}.bc")
+bitcode_file = os.path.join(DRIVER_DIR, f"{driver_base}_final.bc")
 
-base_name = os.path.splitext(os.path.basename(input_driver))[0]
-driver_with_assertion = os.path.join(DRIVER_DIR, f"{base_name}_assert.c")
-bitcode_file = os.path.join(DRIVER_DIR, f"{base_name}_assert.bc")
-
+# Ensure output directory exists
 os.makedirs(DRIVER_DIR, exist_ok=True)
 
-# Insert assertion into the target source file
+# Step 1: Insert assertion into instrumented target source if not already
 instrumented_file = f"{os.path.splitext(source_file)[0]}_{assertion_line}_instrumented.c"
+
 if not os.path.exists(instrumented_file):
     print("[+] Inserting assertion into target source...")
     with open(source_file, 'r') as f:
@@ -46,36 +48,40 @@ if not os.path.exists(instrumented_file):
                 f.write(f"    {assertion_text}\n")
             f.write(line)
 else:
-    print("[✓] Assertion already inserted.")
+    print("[✓] Assertion already inserted into target source.")
 
-# Insert assertion into the driver file
-print("[+] Inserting assertion into driver...")
-with open(input_driver, 'r') as f:
-    lines = f.readlines()
-
-with open(driver_with_assertion, 'w') as f:
-    for line in lines:
-        if "gImageHandle" in line and "gST" in line and "(" in line:
-            f.write(f"    {assertion_text}\n")
-        f.write(line)
-
-print(f"[✓] Driver with assertion written to {driver_with_assertion}")
-
-# Compile driver to LLVM bitcode
-compile_sources = [driver_with_assertion]
-if os.path.exists(STUB_DEF):
-    compile_sources.append(STUB_DEF)
-
-print("[+] Compiling to LLVM bitcode...")
+# Step 2: Compile driver (from inputs/) to .bc
+print("[+] Compiling driver to LLVM bitcode...")
 subprocess.run([
     CLANG_PATH, "-emit-llvm", "-c", "-g", "-O0",
     "-Xclang", "-disable-O0-optnone",
-    *compile_sources,
-    "-o", bitcode_file
+    input_driver,
+    "-o", driver_obj
 ], check=True)
 
-# Run KLEE symbolic execution
-print("[+] Running KLEE symbolic execution...")
+# Step 3: Compile global_stub_defs.c if exists
+if os.path.exists(STUB_DEF):
+    print("[+] Compiling stubs to LLVM bitcode...")
+    stub_obj = os.path.join(DRIVER_DIR, "global_stub_defs.bc")
+    subprocess.run([
+        CLANG_PATH, "-emit-llvm", "-c", "-g", "-O0",
+        "-Xclang", "-disable-O0-optnone",
+        STUB_DEF,
+        "-o", stub_obj
+    ], check=True)
+
+    # Step 4: Link driver and stubs into final .bc
+    print("[+] Linking driver and stubs into final bitcode...")
+    subprocess.run([
+        "llvm-link", driver_obj, stub_obj, "-o", bitcode_file
+    ], check=True)
+else:
+    # No stubs — just rename driver
+    os.rename(driver_obj, bitcode_file)
+
+# Step 5: Run KLEE symbolic execution
+print(f"[+] Running KLEE symbolic execution with timeout {MAX_KLEE_TIME} seconds...")
+
 def run_klee():
     return subprocess.run([
         KLEE_PATH, "--external-calls=all", "-libc=uclibc", "--posix-runtime",
@@ -83,7 +89,8 @@ def run_klee():
         "--write-smt2s", "--write-cov", "--write-cvcs", "--write-kqueries",
         "--write-sym-paths", "--only-output-states-covering-new",
         "--use-query-log=solver:smt2", "--simplify-sym-indices",
-        f"-max-time={MAX_KLEE_TIME}", bitcode_file
+        f"-max-time={MAX_KLEE_TIME}",
+        bitcode_file
     ])
 
 run_klee()

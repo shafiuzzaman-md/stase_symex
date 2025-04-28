@@ -31,7 +31,7 @@ def copy_source_tree(src):
 
 def main():
     if len(sys.argv) != 4:
-        print("Usage: python3 setup_ech.py <source-directory> <clang-path> <klee-path>")
+        print("Usage: python3 setup_edk2_environment.py <source-directory> <clang-path> <klee-path>")
         sys.exit(1)
 
     source_dir = sys.argv[1]
@@ -57,7 +57,7 @@ def main():
     print("[+] Extracting GUIDs and global stubs...")
     subprocess.run(["python3", "extract_protocol_guids.py", INSTRUMENTED_SOURCE_DIR, "--out-dir", OUTPUT_DIR], check=True)
 
-    print(f"[✓] Environment Configuration Harness (ECH) setup completed in {OUTPUT_DIR}/")
+    print(f"[✓] Setup completed successfully in {OUTPUT_DIR}/.")
 
 if __name__ == "__main__":
     main()
