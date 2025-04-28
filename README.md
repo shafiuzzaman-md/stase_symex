@@ -1,16 +1,16 @@
 # STASE Symbolic Execution Workflow
 
 This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) .
-
 ---
 
 ## Input
 
-- Source code directory under inputs/source/
-- Driver .c file under inputs/:
-  - Symbolic declarations
-  - Stub setup
-  - Entry point invocation
+- Source code directory
+- Driver.c file under inputs/:
+  - Contains:
+    - Symbolic declarations
+    - Stub setup
+    - Entry point invocation
 - Assertion expression to inject (derived from vulnerability type, e.g., OOB_WRITE)
 - Assertion line number in the target source file
 - Symbolic execution timeout
@@ -21,17 +21,18 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 
 ---
 
-## Phase 1: Environment Configuration Harnesses (ECH)
+## Phase 1: Setup Phase
 
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
 ```
-python3 setup_ech.py <source-directory> <clang-path> <klee-path>
+python3 staseplusplus/setup_environment.py <source-code-location> <clang-path> <klee-path>
+
 
 ```
 Example:
 ```
-python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
 This script will:
 
@@ -48,13 +49,13 @@ This script will:
 
 - Create a settings.py containing paths to Clang, KLEE, and source
 
-## Phase 2: Path Exploration Harnesses (PEH)
-Run once per assertion  (guided by static analysis).
+## Phase 2: Analysis Phase:
+Run once for each vulnerability identified by static analysis.
 
 ```
-python3 run_analysis.py \
-  <driver_template.c> \
-  <target_source_file.c> \
+python3 staseplusplus/run_analysis.py \
+  <driver.c> \
+  <target_source_file_relative_to_source_dir> \
   <assertion_line_number> \
   <assertion_expression> \
   <max_klee_time_seconds>
@@ -75,7 +76,7 @@ python3 run_analysis.py \
  Where::
 - Inserts the assertion at the specified line in the target source file
 
-- Loads the driver .c file
+- Loads the driver.c file
 
 - Compiles the driver together with stubs into LLVM bitcode
 
@@ -83,18 +84,21 @@ python3 run_analysis.py \
 
 ##  Project Layout
 ```
-your_project_root/
+project_root/
 ├── staseplusplus/
 │   ├── run_analysis.py
-│   ├── setup_ech.py
+│   ├── setup_environment.py
 │   ├── (other scripts)
 ├── stase_generated/
 │   ├── instrumented_source/
-│   │   ├── Testcases/Sample2Tests/CharConverter/CharConverter_146_instrumented.c
+│   │   ├── (copied + instrumented source tree)
 │   ├── generated_klee_drivers/
 │   │   ├── klee_driver_CharConverter_OOB_WRITE_assert.c
+│   ├── global_stubs.h
+│   ├── global_stub_defs.c
+│   ├── driver_stubs.c
+│   ├── settings.py
 ├── inputs/
-│   ├── source/
-│   │   ├── Testcases/Sample2Tests/CharConverter/CharConverter.c
-│   ├── klee_driver_CharConverter_OOB_WRITE.c
+│   ├── klee_driver.c  
+├── (user's original source code placed anywhere)
 ```
