@@ -52,19 +52,25 @@ This script will:
 ## Step 2: Setup Driver
 Run once for each vulnerability to generate an initial driver template.
 ```
-python3 staseplusplus/setup_driver.py \
+python3 setup_driver.py \
   <entrypoint_name> \
   <vulnerability_type> \
   <assertion_line_number> \
-  <target_source_file_relative_to_source_dir>
+  <target_source_file_relative_path> \
+  [--symbolic "type1 name1" "type2 name2" ...] \
+  [--concrete "full_declaration1" "full_declaration2" ...]
+
 ```
 Example:
 ```
-python3 staseplusplus/setup_driver.py \
+python3 setup_driver.py \
   CharConverter \
   OOB_WRITE \
   146 \
-  Testcases/Sample2Tests/CharConverter/CharConverter.c
+  Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  --symbolic "uint8_t InnerBuf[4]" "uint32_t j" "uint32_t last" \
+  --concrete "gSmst = NULL;" "buffer_size = 0x20;"
+
 ```
 This script will:
 - Create a driver skeleton under inputs/ named:
@@ -77,8 +83,11 @@ For example:
 inputs/klee_driver_CharConverter_OOB_WRITE_146.c
 ```
 
+Driver will contain:
+- Symbolic declarations for attacker-controlled inputs
+- Concrete initializations for stubs and system fields
+
 ### After Driver Generation: Manual Steps
-- Mark all attacker-controlled variables as symbolic (using klee_make_symbolic)
 - Add any custom stub initialization if needed
 
 ## Step 3: Run Analysis
@@ -98,11 +107,12 @@ Note: The last argument <max_klee_time_seconds> is optional. If omitted, it will
 Example:
 ```
 python3 run_analysis.py \
-  inputs/klee_driver_CharConverter_OOB_WRITE.c \
+  ../inputs/klee_driver_CharConverter_OOB_WRITE_146.c \
   Testcases/Sample2Tests/CharConverter/CharConverter.c \
   146 \
   "klee_assert(j <= last);" \
   10
+
 
 
 ```
