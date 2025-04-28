@@ -6,10 +6,14 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 
 ## Input
 
-- Source code directory under analysis
-- Entry point and vulnerable instruction location: From static analysis
-- Assertion template: Derived for vulnerability type (e.g., OOB_WRITE)
-
+- Source code directory under inputs/source/
+- Driver .c file under inputs/:
+  - Symbolic declarations
+  - Stub setup
+  - Entry point invocation
+- Assertion expression to inject (derived from vulnerability type, e.g., OOB_WRITE)
+- Assertion line number in the target source file
+- Symbolic execution timeout
 ---
 
 ## Output
@@ -22,7 +26,8 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
 ```
-python3 setup_ech.py <edk2-directory> <clang-path> <klee-path>
+python3 setup_ech.py <source-directory> <clang-path> <klee-path>
+
 ```
 Example:
 ```
@@ -30,44 +35,66 @@ python3 setup_ech.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/sha
 ```
 This script will:
 
-- Copy the entire source tree into stase_generated/instrumented_source/
+- Copy the source tree into stase_generated/instrumented_source/
 
 - Rewrite #include <...> to #include "..." with full relative paths
 
 - Comment out all STATIC_ASSERT() macros
 
-- Extract all protocol GUIDs and global symbols to:
-  - global_stubs.h: contains extern declarations and shared includes
-  - global_stub_defs.c: contains stub definitions with zeroed initializations
+- Extract protocol GUIDs and global variables into:
+  - global_stubs.h and global_stub_defs.c
 
-- Generate a settings.py file containing:
+- Generate static driver stubs in driver_stubs.c
 
- - Absolute path to instrumented source
-
- - Path to Clang compiler
-
- - Path to the KLEE binary
-
-All generated files, modified source code, and configuration will be stored under stase_generated/.
+- Create a settings.py containing paths to Clang, KLEE, and source
 
 ## Phase 2: Path Exploration Harnesses (PEH)
-Run once per assertion (generated via static analysis). You must provide the relative path, and also specify the KLEE timeout.
+Run once per assertion  (guided by static analysis).
+
 ```
 python3 run_analysis.py \
-  Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  146 \
-  OOB_WRITE \
-  "(*OutputBuffer)[OutIndex++] = 0x1B;" \
-  5
+  <driver_template.c> \
+  <target_source_file.c> \
+  <assertion_line_number> \
+  <assertion_expression> \
+  <max_klee_time_seconds>
 
 ```
- What this does:
-- Checks if the assertion is already inserted
 
-- If not, auto-inserts it at the specified line
+Example:
+```
+python3 run_analysis.py \
+  inputs/klee_driver_CharConverter_OOB_WRITE.c \
+  Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  146 \
+  "klee_assert(j <= last);" \
+  5
 
-- Generates a per-assertion KLEE driver for the relevant entrypoint (e.g., CharConverterEntryPoint)
 
-- Compiles the instrumented file to LLVM bitcode
+```
+ Where::
+- Inserts the assertion at the specified line in the target source file
 
-- Runs KLEE symbolic execution to explore relevant paths and check satisfiability of the assertion
+- Loads the driver .c file
+
+- Compiles the driver together with stubs into LLVM bitcode
+
+- Runs KLEE symbolic execution for the specified timeout
+
+##  Project Layout
+```
+your_project_root/
+├── staseplusplus/
+│   ├── run_analysis.py
+│   ├── setup_ech.py
+│   ├── (other scripts)
+├── stase_generated/
+│   ├── instrumented_source/
+│   │   ├── Testcases/Sample2Tests/CharConverter/CharConverter_146_instrumented.c
+│   ├── generated_klee_drivers/
+│   │   ├── klee_driver_CharConverter_OOB_WRITE_assert.c
+├── inputs/
+│   ├── source/
+│   │   ├── Testcases/Sample2Tests/CharConverter/CharConverter.c
+│   ├── klee_driver_CharConverter_OOB_WRITE.c
+```
