@@ -7,131 +7,125 @@ import re
 
 from pathlib import Path
 
-def extract_entrypoint_signature(entry_file, entrypoint_name):
-    with open(entry_file, 'r', encoding='utf-8', errors='ignore') as f:
-        content = f.read()
-
-    # Match function signature including multiline args
-    pattern = re.compile(rf'{re.escape(entrypoint_name)}\s*\((.*?)\)', re.DOTALL)
-    match = pattern.search(content)
-    if not match:
+def extract_entrypoint_signature(path, fname):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        txt = f.read()
+    m = re.search(rf'{re.escape(fname)}\s*\((.*?)\)', txt, re.DOTALL)
+    if not m:
         return [], []
-
-    arg_string = match.group(1).strip().replace('\n', ' ')
-    arg_list = [arg.strip() for arg in arg_string.split(',') if arg.strip()]
-
-    declarations = []
-    names = []
-    for arg in arg_list:
-        parts = arg.split()
+    arg_str = m.group(1).strip().replace('\n', ' ')
+    arg_list = [a.strip() for a in arg_str.split(',') if a.strip()]
+    decls, names = [], []
+    for a in arg_list:
+        parts = a.split()
         if not parts:
             continue
-        name = parts[-1].replace("*", "").strip()
-        decl = ' '.join(parts[:-1]) + ' ' + parts[-1]
-        declarations.append(decl)
+        name = parts[-1].replace('*', '').strip()
+        decl  = ' '.join(parts[:-1]) + ' ' + parts[-1]
+        decls.append(decl)
         names.append(name)
-    return declarations, names
+    return decls, names
 
-def extract_headers(entry_file):
-    headers = []
-    with open(entry_file, 'r', encoding='utf-8', errors='ignore') as f:
+def extract_headers(path):
+    hdrs = []
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:
-            line = line.strip()
-            if line.startswith('#include') and '"' in line:
-                headers.append(line)
-    return headers
+            if line.strip().startswith('#include') and '"' in line:
+                hdrs.append(line.strip())
+    return hdrs
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate a KLEE driver template for STASE analysis.")
-    parser.add_argument("entrypoint_file", help="Relative path to source file containing the entrypoint function")
-    parser.add_argument("entrypoint_name", help="Entrypoint function name (e.g., CharConverterEntryPoint)")
-    parser.add_argument("vulnerability_type", help="Vulnerability type (e.g., OOB_WRITE)")
-    parser.add_argument("assertion_line", help="Line number where the vulnerability is located")
-    parser.add_argument("target_source_relative_path", help="Relative path to target source file inside source tree")
-    parser.add_argument("--symbolic", nargs="*", help="List of symbolic variable declarations (e.g., 'uint8_t buf[16]')")
-    parser.add_argument("--concrete", nargs="*", help="List of concrete initialization lines (e.g., 'gSmst = NULL;')")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser("Generate KLEE driver")
+    ap.add_argument("entrypoint_file")
+    ap.add_argument("entrypoint_name")
+    ap.add_argument("vulnerability_type")
+    ap.add_argument("assertion_line")
+    ap.add_argument("target_source_relative_path")
+    ap.add_argument("--symbolic", nargs='*', default=[])
+    ap.add_argument("--concrete", nargs='*', default=[])
+    args = ap.parse_args()
 
-    entry_file = args.entrypoint_file
-    entrypoint = args.entrypoint_name
-    vuln_type = args.vulnerability_type
-    line_number = args.assertion_line
-    target_source_rel = args.target_source_relative_path
-    symbolic_vars = args.symbolic or []
-    concrete_inits = args.concrete or []
+    INPUTS = "../inputs"
+    os.makedirs(INPUTS, exist_ok=True)
 
-    INPUTS_DIR = "../inputs"
-    os.makedirs(INPUTS_DIR, exist_ok=True)
+    driver_name = f"klee_driver_{args.entrypoint_name}_{args.vulnerability_type}_{args.assertion_line}.c"
+    driver_path = os.path.join(INPUTS, driver_name)
 
-    driver_filename = f"klee_driver_{entrypoint}_{vuln_type}_{line_number}.c"
-    driver_path = os.path.join(INPUTS_DIR, driver_filename)
+    instr_src = os.path.join("../stase_generated/instrumented_source", args.target_source_relative_path)
+    instr_dir = os.path.dirname(instr_src)
+    entry_abs = os.path.join("../stase_generated/instrumented_source", args.entrypoint_file)
 
-    instrumented_source_path = os.path.join("../stase_generated/instrumented_source", target_source_rel)
-    instrumented_dir = os.path.dirname(instrumented_source_path)
+    headers = extract_headers(entry_abs)
+    param_decls, param_names = extract_entrypoint_signature(entry_abs, args.entrypoint_name)
 
-    entry_file_path = os.path.join("../stase_generated/instrumented_source", entry_file)
-    headers = extract_headers(entry_file_path)
-    param_decls, param_names = extract_entrypoint_signature(entry_file_path, entrypoint)
+    sym_vars = args.symbolic
+    conc_inits = args.concrete
 
-    with open(driver_path, "w") as f:
-        f.write(f"// Auto-generated KLEE driver template for {entrypoint}\n")
-        f.write(f"#include \"../stase_generated/global_stubs.h\"\n")
-        f.write(f"#include \"../stase_generated/global_stub_defs.c\"\n")
-        f.write(f"#include \"../stase_symex/klee/klee.h\"\n")
-        f.write("#include <string.h>\n#include <stdlib.h>\n")
+    sym_names_set = {d.split()[-1].split('[')[0].replace('*','').strip() for d in sym_vars}
 
-        for hdr in headers:
-            hdr_path = hdr.split('"')[1] if '"' in hdr else None
-            if hdr_path:
-                full_path = os.path.normpath(os.path.join(instrumented_dir, hdr_path))
-                rel_path = os.path.relpath(full_path, os.path.dirname(driver_path))
-                f.write(f'#include \"{rel_path}\"\n')
+    with open(driver_path, 'w') as f:
+        f.write(f"// Auto-generated KLEE driver for {args.entrypoint_name}\n")
+        f.write('#include "../stase_generated/global_stubs.h"\n')
+        f.write('#include "../stase_generated/global_stub_defs.c"\n')
+        f.write('#include "../stase_symex/klee/klee.h"\n')
+        f.write('#include <string.h>\n#include <stdlib.h>\n')
 
-        rel_entry_source = os.path.relpath(instrumented_source_path, os.path.dirname(driver_path))
-        f.write(f"\n// Include the entrypoint source file\n")
-        f.write(f'#include \"{rel_entry_source}\"\n\n')
+        # include headers
+        for h in headers:
+            hfile = h.split('"')[1]
+            full  = os.path.normpath(os.path.join(instr_dir, hfile))
+            rel   = os.path.relpath(full, os.path.dirname(driver_path))
+            f.write(f'#include "{rel}"\n')
 
-        f.write("int main() {\n")
+        rel_entry = os.path.relpath(instr_src, os.path.dirname(driver_path))
+        f.write('\n// Instrumented entrypoint source\n')
+        f.write(f'#include "{rel_entry}"\n\n')
 
-        if symbolic_vars:
-            f.write("\n    // Symbolic variables\n")
-            for decl in symbolic_vars:
-                name = decl.split()[-1]
-                name_for_symbolic = name.replace('[', '_').replace(']', '')
-                if '[' in name:
-                    f.write(f"    {decl};\n")
-                    f.write(f"    klee_make_symbolic({name.split('[')[0]}, sizeof({name_for_symbolic}), \"{name_for_symbolic}\");\n")
-                else:
-                    f.write(f"    {decl};\n")
-                    f.write(f"    klee_make_symbolic(&{name}, sizeof({name}), \"{name}\");\n")
+        f.write('int main() {\n')
 
-        
+        # symbolic variables
+        if sym_vars:
+            f.write('    // Symbolic variables\n')
+            for decl in sym_vars:
+                raw_name = decl.split()[-1]
+                base_name = raw_name.replace('[','_').replace(']','')
+                if '[' in raw_name:  # array
+                    f.write(f'    {decl};\n')
+                    f.write(f'    klee_make_symbolic({raw_name.split("[")[0]}, sizeof({base_name}), "{base_name}");\n')
+                elif '*' in decl:   # pointer -> malloc + pointee symbolic
+                    base_type = ' '.join(decl.split()[:-1]).replace('*','').strip()
+                    ptr_name  = raw_name.lstrip('*')
+                    f.write(f'    {decl} = malloc(sizeof({base_type}));\n')
+                    f.write(f'    klee_make_symbolic({ptr_name}, sizeof({base_type}), "{ptr_name}");\n')
+                else:               # scalar
+                    f.write(f'    {decl};\n')
+                    f.write(f'    klee_make_symbolic(&{raw_name}, sizeof({raw_name}), "{raw_name}");\n')
 
+        # param declarations not already symbolic
         if param_decls:
-            f.write("\n    // Entry point arguments\n")
-            symbolic_names = {decl.split()[-1].split('[')[0] for decl in symbolic_vars}
-            for decl in param_decls:
-                name = decl.split()[-1].split('[')[0]
-                if name not in symbolic_names:
-                 f.write(f"    {decl};\n")
+            f.write('\n    // Entrypoint parameters\n')
+            for decl, name in zip(param_decls, param_names):
+                if name not in sym_names_set:
+                    if '*' in decl:
+                        f.write(f'    {decl} = NULL;\n')
+                    else:
+                        f.write(f'    {decl} = 0;\n')
 
+        # concrete initialisations
+        if conc_inits:
+            f.write('\n    // Concrete initialisations\n')
+            for line in conc_inits:
+                f.write(f'    {line}\n')
 
-        if concrete_inits:
-            f.write("\n    // Concrete initializations\n")
-            for line in concrete_inits:
-                f.write(f"    {line}\n")
+        # call entrypoint
+        call_list = ', '.join(param_names)
+        f.write('\n    // Call entrypoint\n')
+        f.write(f'    {args.entrypoint_name}({call_list});\n')
 
-        f.write("\n    // Call the entrypoint\n")
-        if param_names:
-            call_args = ', '.join(param_names)
-            f.write(f"    {entrypoint}({call_args});\n")
-        else:
-            f.write(f"    {entrypoint}();\n")
+        f.write('\n    return 0;\n')
+        f.write('}\n')
 
-        f.write("\n    return 0;\n")
-        f.write("}\n")
+    print(f"[✓] Driver generated at {driver_path}")
 
-    print(f"[✓] Driver template generated at: {driver_path}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
