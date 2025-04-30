@@ -68,8 +68,8 @@ python3 setup_driver.py \
   OOB_WRITE \
   146 \
   Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  --symbolic "uint8_t InnerBuf[4]" "uint32_t j" "uint32_t last" \
-  --concrete "gSmst = NULL;" "buffer_size = 0x20;"
+  --symbolic "ICONV_T *CharDesc" "CHAR8 *InputBuffer" "INTN InputSize" "CHAR8 **OutputBuffer" "INTN *OutputSize"\
+  --concrete ""
 
 ```
 This script will:
@@ -86,11 +86,12 @@ This script will:
 
 - Populate includes, `initialize_stubs()`, symbolic declarations, concrete inits, and entrypoint call
 
-### After Driver Generation: Manual Steps
+### After Driver Generation: Human in the loop
+Update the generated driver if needed:
 
-- Add function stubs (if needed)
+- Add function stubs (if needed) for the uninteresting functions
 
-- Add initialization for system globals not attacker-controlled
+- Add initialization for system globals
 
 ## Step 3: Run Symbolic Analysis
 

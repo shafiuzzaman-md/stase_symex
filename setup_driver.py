@@ -92,7 +92,6 @@ def main():
         f.write(f'#include \"{rel_entry_source}\"\n\n')
 
         f.write("int main() {\n")
-        f.write("    initialize_stubs();\n")
 
         if symbolic_vars:
             f.write("\n    // Symbolic variables\n")
@@ -106,15 +105,21 @@ def main():
                     f.write(f"    {decl};\n")
                     f.write(f"    klee_make_symbolic(&{name}, sizeof({name}), \"{name}\");\n")
 
+        
+
+        if param_decls:
+            f.write("\n    // Entry point arguments\n")
+            symbolic_names = {decl.split()[-1].split('[')[0] for decl in symbolic_vars}
+            for decl in param_decls:
+                name = decl.split()[-1].split('[')[0]
+                if name not in symbolic_names:
+                 f.write(f"    {decl};\n")
+
+
         if concrete_inits:
             f.write("\n    // Concrete initializations\n")
             for line in concrete_inits:
                 f.write(f"    {line}\n")
-
-        if param_decls:
-            f.write("\n    // Entry point arguments\n")
-            for decl in param_decls:
-                f.write(f"    {decl};\n")
 
         f.write("\n    // Call the entrypoint\n")
         if param_names:
