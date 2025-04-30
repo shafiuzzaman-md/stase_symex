@@ -69,7 +69,7 @@ def main():
         f.write('#include "../stase_generated/global_stub_defs.c"\n')
         f.write('#include "../stase_symex/klee/klee.h"\n')
         f.write('#include <string.h>\n#include <stdlib.h>\n')
-
+        f.write('#include "../stase_symex/uefi_helper_stubs.c"\n')
         # include headers
         for h in headers:
             hfile = h.split('"')[1]
