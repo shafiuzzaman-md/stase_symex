@@ -1,18 +1,17 @@
 # STASE Symbolic Execution Workflow
 
-This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature) .
+This repository implements symbolic exution using **STASE** (Static Analysis guided Symbolic Execution) to discover vulnerabilities (with vulnerability signature).
 ---
 
 ## Input
 
-- Source code directory
+- Source code directory (e.g., EDK2 clone or Linux module)
 - Driver.c file under inputs/:
   - Contains:
     - Symbolic declarations
     - Stub setup
     - Entry point invocation
-- Assertion expression to inject (derived from vulnerability type, e.g., OOB_WRITE)
-- Assertion line number in the target source file
+- Assertion expression (derived from vulnerability type, e.g., OOB_WRITE)
 - Symbolic execution timeout (optional)
 ---
 
@@ -26,7 +25,7 @@ This repository implements symbolic exution using **STASE** (Static Analysis gui
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
 ```
-python3 staseplusplus/setup_environment.py <source-code-location> <clang-path> <klee-path>
+python3 setup_environment.py <source-code-location> <clang-path> <klee-path>
 
 
 ```
@@ -64,7 +63,7 @@ python3 setup_driver.py \
 Example:
 ```
 python3 setup_driver.py \
-  CharConverter \
+  Iconv \
   OOB_WRITE \
   146 \
   Testcases/Sample2Tests/CharConverter/CharConverter.c \
@@ -87,18 +86,20 @@ Driver will contain:
 - Symbolic declarations for attacker-controlled inputs
 - Concrete initializations for stubs and system fields
 
+- Insert the assertion at the specified line into the target source
+- Pre-fill includes, `initialize_stubs()`, and entrypoint call
+
 ### After Driver Generation: Manual Steps
 - Add any custom stub initialization if needed
 
-## Step 3: Run Analysis
-Once the driver is ready, run run_analysis.py to insert the assertion, compile, and start symbolic execution.
+## Step 3: Run Symbolic Analysis
+
+Once the driver is ready and the target source is instrumented, run:
 
 ```
 python3 staseplusplus/run_analysis.py \
   <driver.c> \
   <target_source_file_relative_to_source_dir> \
-  <assertion_line_number> \
-  <assertion_expression> \
    [<max_klee_time_seconds>]
 
 ```
@@ -106,18 +107,14 @@ Note: The last argument <max_klee_time_seconds> is optional. If omitted, it will
 
 Example:
 ```
-python3 run_analysis.py \
+python3 run_symbolic_analysis.py \
   ../inputs/klee_driver_CharConverter_OOB_WRITE_146.c \
-  Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  146 \
-  "klee_assert(j <= last);" \
   10
 
 
 
 ```
 What this does:
-- Inserts the assertion at the specified line in the target source file
 
 - Loads the driver.c file
 
@@ -128,7 +125,7 @@ What this does:
 ##  Project Layout
 ```
 project_root/
-├── staseplusplus/
+├── stase/
 │   ├── setup_environment.py
 │   ├── setup_driver.py
 │   ├── run_analysis.py
