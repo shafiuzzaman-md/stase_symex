@@ -51,6 +51,7 @@ This script will:
 Run once for each vulnerability detected by static analysis to generate a KLEE driver and insert assertion.
 ```
 python3 setup_driver.py \
+  <entrypoint_source_file_relative_path> \
   <entrypoint_name> \
   <vulnerability_type> \
   <assertion_line_number> \
@@ -62,6 +63,7 @@ python3 setup_driver.py \
 Example:
 ```
 python3 setup_driver.py \
+  Testcases/Sample2Tests/CharConverter/CharConverter.c \
   Iconv \
   OOB_WRITE \
   146 \
@@ -101,8 +103,8 @@ python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
 
 Example:
 ```
-python3 run_symbolic_analysis.py \
-  ../inputs/klee_driver_CharConverter_OOB_WRITE_146.c \
+python3 run_analysis.py \
+  ../inputs/klee_driver_Iconv_OOB_WRITE_146.c \
   10
 ```
 This will:
