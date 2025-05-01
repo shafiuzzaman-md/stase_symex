@@ -1,171 +1,209 @@
 #!/usr/bin/env python3
 """
-Generate a KLEE driver template that already:
-  • includes global-stubs + helper stubs
-  • inserts all #include dependencies
-  • allocates / makes-symbolic every --symbolic var
-  • declares entry-point parameters
+setup_driver.py – generate a KLEE driver *and* inject a user-supplied
+assertion in an instrumented source file.
+
+Mandatory flags
+---------------
+--entry-src   <rel-path>   C file that contains the entry-point
+--entry-func  <symbol>     Entry-point function name (e.g. Iconv)
+--vuln        <OOB_WRITE|WWW|CFH>
+--assert-line <N>          Line (in --target-src) to put the assertion *before*
+--target-src  <rel-path>   Source file where assertion goes
+--assertion   "<expr>"     Expression for klee_assert(...)
+
+Optional / repeatable
+---------------------
+--symbolic "type name"           (in main)
+--concrete "stmt;"               (emitted inside main)
+--global   "type name"           (file-scope declaration before main)
+
+Example
+-------
+python3 setup_driver.py \\
+  --entry-src   Testcases/Sample2Tests/CharConverter/CharConverter.c \\
+  --entry-func  Iconv \\
+  --vuln        OOB_WRITE \\
+  --assert-line 146 \\
+  --target-src  Testcases/Sample2Tests/CharConverter/CharConverter.c \\
+  -g          "unsigned OutputBuffer_cap" \\
+  --symbolic  "unsigned OutputBuffer_cap" "CHAR8 **OutputBuffer" \\
+  --concrete  "*OutputBuffer = malloc(OutputBuffer_cap);" \\
+              "klee_make_symbolic(*OutputBuffer, OutputBuffer_cap, \\\"OutputBuffer_data\\\");" \\
+              "klee_assume(OutputBuffer_cap>=1 && OutputBuffer_cap<=4096);" \\
+  --assertion "OutIndex < OutputBuffer_cap"
 """
 
-import os
-import re
-import argparse
+import argparse, os, re
 from pathlib import Path
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
-PROTO_RE = r'{}\s*\((.*?)\)'          # filled with entry-point name
+SIG_RE = r'{}\s*\((.*?)\)'          # filled with entry-func
 
 
-def extract_signature(src: Path, fname: str):
-    """Return (declarations[], names[]) for the entry-point parameters."""
+# ---------------------------------------------------------------- helpers
+def sig_info(src: Path, fn: str):
     txt = src.read_text(errors='ignore')
-    m = re.search(PROTO_RE.format(re.escape(fname)), txt, re.DOTALL)
+    m   = re.search(SIG_RE.format(re.escape(fn)), txt, re.DOTALL)
     if not m:
         return [], []
-
-    arg_list = [a.strip() for a in m.group(1).replace('\n', ' ').split(',')
-                if a.strip()]
+    args = [a.strip() for a in m.group(1).replace('\n', ' ').split(',') if a.strip()]
     decls, names = [], []
-    for arg in arg_list:
-        bits = arg.split()
-        if not bits:
-            continue
-        decl  = ' '.join(bits[:-1]) + ' ' + bits[-1]
-        name  = bits[-1].lstrip('*').rstrip('[]')
-        decls.append(decl)
-        names.append(name)
+    for a in args:
+        parts = a.split()
+        decls.append(' '.join(parts[:-1]) + ' ' + parts[-1])
+        names.append(parts[-1].lstrip('*').rstrip('[]'))
     return decls, names
 
 
-def header_includes(src: Path):
-    """All local #include "foo.h" lines in *src*."""
-    hdrs = []
-    for line in src.read_text(errors='ignore').splitlines():
-        line = line.strip()
-        if line.startswith('#include') and '"' in line:
-            hdrs.append(line)
-    return hdrs
+def local_hdrs(src: Path):
+    return [l.strip() for l in src.read_text(errors='ignore').splitlines()
+            if l.strip().startswith('#include') and '"' in l]
 
 
-# ----------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------
+def clean_old_asserts(path: Path):
+    """
+    Remove every line that already contains a KLEE assertion.
+    Called before we splice-in the fresh assertion so we never double-instrument.
+    """
+    src = path.read_text(errors='ignore').splitlines()
+    cleaned = [ln for ln in src if "klee_assert(" not in ln]
+    if len(cleaned) != len(src):
+        path.write_text("\n".join(cleaned))
+
+def inject_assert(path: Path, ln: int, expr: str):
+    """
+    • drop any previous klee_assert(...) lines first
+    • then insert  '    klee_assert(expr);'  **before** the 1-based line <ln>
+    """
+    clean_old_asserts(path)
+
+    lines = path.read_text(errors='ignore').splitlines()
+    # avoid duplicate insert of exactly the same assertion text
+    if any(expr in L for L in lines):
+        return
+
+    insert_at = max(0, ln - 1)          # convert 1-based → 0-based, keep ≥0
+    lines.insert(insert_at, f"    klee_assert({expr});")
+    path.write_text("\n".join(lines))
+
+
+# ---------------------------------------------------------------- main
 def main():
-    ap = argparse.ArgumentParser("Generate driver skeleton")
-    ap.add_argument("entrypoint_file")              # relative to source tree
-    ap.add_argument("entrypoint_name")              # e.g. Iconv
-    ap.add_argument("vuln_type")                    # e.g. OOB_WRITE
-    ap.add_argument("assert_line")                  # 146
-    ap.add_argument("target_source_rel")            # relative .c for assert
-    ap.add_argument("--symbolic", nargs='*', default=[])
-    ap.add_argument("--concrete", nargs='*', default=[])
+    ap = argparse.ArgumentParser("Generate driver + inject assertion")
+    req = ap.add_argument_group("required")
+    req.add_argument("--entry-src",   required=True)
+    req.add_argument("--entry-func",  required=True)
+    req.add_argument("--vuln",        required=True,
+                     choices=["OOB_WRITE", "WWW", "CFH"])
+    req.add_argument("--assert-line", required=True, type=int)
+    req.add_argument("--target-src",  required=True)
+    req.add_argument("--assertion",   required=True)
+
+    rep = ap.add_argument_group("repeatable / optional")
+    rep.add_argument("--symbolic", action='append', default=[],
+                     help='declare symbolic var inside main()')
+    rep.add_argument("--concrete", action='append', default=[],
+                     help='verbatim stmt inside main()')
+    rep.add_argument("-g", "--global", dest="globals_", action='append',
+                     default=[], help='file-scope declaration')
+
     args = ap.parse_args()
 
-    INPUT_DIR = Path("../inputs")
-    INPUT_DIR.mkdir(exist_ok=True)
+    sg_root   = Path("../stase_generated")
+    src_root  = sg_root / "instrumented_source"
+    entry_abs = src_root / args.entry_src
+    target_abs= src_root / args.target_src
 
-    drv_name = f"klee_driver_{args.entrypoint_name}_{args.vuln_type}_{args.assert_line}.c"
-    drv_path = INPUT_DIR / drv_name
+    # ---------------------------------------------------------------- assert
+    inject_assert(target_abs, args.assert_line, args.assertion)
 
-    # Paths inside stase_generated
-    SG           = Path("../stase_generated")
-    SRC_ROOT     = SG / "instrumented_source"
-    entry_abs    = SRC_ROOT / args.entrypoint_file
-    target_abs   = SRC_ROOT / args.target_source_rel
-    includes_dir = target_abs.parent
+    # ---------------------------------------------------------------- driver
+    inputs_dir = Path("../inputs"); inputs_dir.mkdir(exist_ok=True)
+    drv_path   = inputs_dir / f"klee_driver_{args.entry_func}_{args.vuln}_{args.assert_line}.c"
 
-    # ---- gather information ------------------------------------------------
-    hdr_lines          = header_includes(entry_abs)
-    param_decls, pnames = extract_signature(entry_abs, args.entrypoint_name)
+    hdrs        = local_hdrs(entry_abs)
+    pdecl, pnam = sig_info(entry_abs, args.entry_func)
 
-    sym_decl_set = {d.split()[-1].lstrip('*').split('[')[0] for d in args.symbolic}
+    glob_set = {d.split()[-1].lstrip('*').split('[')[0] for d in args.globals_}
+    sym_set  = {d.split()[-1].lstrip('*').split('[')[0] for d in args.symbolic}
 
-    # ---- write driver ------------------------------------------------------
+    inc_dir = target_abs.parent
+
     with drv_path.open('w') as f:
-        write = f.write
-        write(f"// Auto-generated KLEE driver for {args.entrypoint_name}\n")
-        write('#include "../stase_generated/global_stubs.h"\n')
-        write('#include "../stase_generated/global_stub_defs.c"\n')
-        write('#include "../stase_symex/uefi_helper_stubs.c"\n')
-        write('#include "../stase_symex/klee/klee.h"\n')
-        write('#include <string.h>\n#include <stdlib.h>\n')
+        W = f.write
+        # ------- includes --------------------------------------------------
+        W(f"// Auto-generated driver for {args.entry_func}\n")
+        W('#include "../stase_generated/global_stubs.h"\n')
+        W('#include "../stase_generated/global_stub_defs.c"\n')
+        W('#include "../stase_symex/uefi_helper_stubs.c"\n')
+        W('#include "../stase_symex/klee/klee.h"\n')
+        W('#include <string.h>\n#include <stdlib.h>\n')
 
-        # local header dependencies
-        for inc in hdr_lines:
-            hdr_file = inc.split('"')[1]
-            full     = (includes_dir / hdr_file).resolve()
-            rel      = os.path.relpath(full, drv_path.parent)
-            write(f'#include "{rel}"\n')
+        for inc in hdrs:
+            hdr = inc.split('"')[1]
+            W(f'#include "{os.path.relpath((inc_dir / hdr).resolve(), drv_path.parent)}"\n')
 
-        # entrypoint .c file itself
-        rel_entry_c = os.path.relpath(target_abs, drv_path.parent)
-        write("\n// Instrumented entrypoint source\n")
-        write(f'#include "{rel_entry_c}"\n\n')
+        # ------- user-requested globals -----------------------------------
+        if args.globals_:
+            W('\n// ----- user globals -----\n')
+            for g in args.globals_:
+                W(f'{g};\n')
 
-        # ---------- main() -------------
-        write("int main(void) {\n")
+        # ------- instrumented source --------------------------------------
+        W('\n// Instrumented entry-point source\n')
+        W(f'#include "{os.path.relpath(target_abs, drv_path.parent)}"\n\n')
 
-        # -- symbolic (user-supplied) --
+        # =========================  main() ================================
+        W('int main(void) {\n')
+
+        # --- symbolic declarations ---------------------------------------
         if args.symbolic:
-            write("    // Symbolic variables\n")
+            W('    // Symbolic variables\n')
             for decl in args.symbolic:
-                raw      = decl.split()[-1]
-                base_nm  = raw.lstrip('*').replace('[', '_').replace(']', '')
-                if '[' in raw:                           # array
-                    write(f"    {decl};\n")
-                    write(f"    klee_make_symbolic({raw.split('[')[0]}, "
-                          f"sizeof({base_nm}), \"{base_nm}\");\n")
-                elif '**' in decl:                       # double pointer
+                raw  = decl.split()[-1]
+                base = raw.lstrip('*').replace('[', '_').replace(']', '')
+                if '[' in raw:
+                    W(f'    {decl};\n')
+                    W(f'    klee_make_symbolic({raw.split("[")[0]}, sizeof({base}), "{base}");\n')
+                elif '**' in decl:
                     base_t = ' '.join(decl.split()[:-1]).replace('*', '').strip()
                     ptr_nm = raw.lstrip('*')
-                    write(f"    {decl} = malloc(sizeof({base_t} *));\n")
-                    write(f"    klee_make_symbolic({ptr_nm}, sizeof({base_t} *), "
-                          f"\"{ptr_nm}\");\n")
-                elif '*' in decl:                        # single pointer
+                    W(f'    {decl} = malloc(sizeof({base_t} *));\n')
+                    W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t} *), "{ptr_nm}");\n')
+                elif '*' in decl:
                     base_t = ' '.join(decl.split()[:-1]).replace('*', '').strip()
                     ptr_nm = raw.lstrip('*')
-                    write(f"    {decl} = malloc(sizeof({base_t}));\n")
-                    write(f"    klee_make_symbolic({ptr_nm}, sizeof({base_t}), "
-                          f"\"{ptr_nm}\");\n")
-                else:                                    # scalar
-                    write(f"    {decl};\n")
-                    write(f"    klee_make_symbolic(&{raw}, sizeof({raw}), "
-                          f"\"{raw}\");\n")
+                    W(f'    {decl} = malloc(sizeof({base_t}));\n')
+                    W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t}), "{ptr_nm}");\n')
+                else:
+                    # scalar; decl may already exist globally – skip re-decl
+                    if raw not in glob_set:
+                        W(f'    {decl};\n')
+                    W(f'    klee_make_symbolic(&{raw}, sizeof({raw}), "{raw}");\n')
 
-        # -- parameters not already symbolic --
-        if param_decls:
-            write("\n    // Entrypoint parameters\n")
-            for decl, nm in zip(param_decls, pnames):
-                if nm not in sym_decl_set:
-                    if '*' in decl:
-                        write(f"    {decl} = NULL;\n")
-                    else:
-                        write(f"    {decl} = 0;\n")
+        # --- entry-point parameters --------------------------------------
+        if pdecl:
+            W('\n    // Entry-point parameters (default init)\n')
+            for d, n in zip(pdecl, pnam):
+                if n not in sym_set and n not in glob_set:
+                    W(f'    {d} = {"NULL" if "*" in d else "0"};\n')
 
-        # -- concrete initialisation --
+        # --- concrete user statements ------------------------------------
         if args.concrete:
-            write("\n    // Concrete initialisations\n")
-            for line in args.concrete:
-                write(f"    {line}\n")
+            W('\n    // Concrete initialisation / constraints\n')
+            for stmt in args.concrete:
+                W(f'    {stmt}\n')
 
-        # -- call entrypoint --
-        call_args = ', '.join(pnames)
-        write("\n    // Call entrypoint\n")
-        write(f"    {args.entrypoint_name}({call_args});\n")
+        # --- call ---------------------------------------------------------
+        W('\n    // Call entry-point\n')
+        W(f'    {args.entry_func}({", ".join(pnam)});\n')
+        W('    return 0;\n}\n')
 
-        write("\n    return 0;\n")
-        write("}\n")
+    # ---------------------------------------------------------------- info
+    print(f"[✓] Driver  : {drv_path.resolve()}")
+    rel_t = target_abs.relative_to(sg_root)
+    print(f"[✓] Assert  : inserted before line {args.assert_line} in {rel_t}")
 
-    # --- final message ---------------------------------------------------
-    try:
-        pretty = drv_path.relative_to(Path.cwd())
-    except ValueError:
-        pretty = drv_path.resolve()
-    print(f"[✓] Driver generated -> {pretty}")
-
-
-
+# -------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
