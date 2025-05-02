@@ -33,10 +33,6 @@ Run **once** to set up the environment and prepare environment-wide stubs and in
 ```
 python3 setup_environment.py <source-code-location> <clang-path> <klee-path>
 ```
-Copies the tree to stase_generated/instrumented_source/, rewrites local
-includes, comments out STATIC_ASSERT(), extracts thousands of UEFI globals
-into global_stub_defs.c, and writes settings.py (paths for Clang & KLEE).
-
 Example on EDK II:
 ```
 python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
