@@ -1,6 +1,7 @@
 # STASE Symbolic Execution Workflow (STASE_SYMEX)
 
 STASE_SYMEX combines static-analysis findings with KLEE-based symbolic execution to confirm the vulnerability and extract the vulnerability preconditions. 
+
 ---
 
 ## Input
