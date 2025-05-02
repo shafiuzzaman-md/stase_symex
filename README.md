@@ -89,7 +89,6 @@ Results:
 inputs/klee_driver_Iconv_OOB_WRITE_146.c
 stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
 ```
-### Human-in-the-loop edits: Add missing stubs (when the build breaks)
 
 ## Step 3: Run Symbolic Analysis
 
