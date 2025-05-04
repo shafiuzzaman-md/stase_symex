@@ -42,7 +42,7 @@ def run_klee():
         KLEE_PATH, "--external-calls=all", "-libc=uclibc", "--posix-runtime",
         "--smtlib-human-readable", "--write-test-info", "--write-paths",
         "--write-smt2s", "--write-cov", "--write-cvcs", "--write-kqueries",
-        "--write-sym-paths", "--only-output-states-covering-new",
+        "--write-sym-paths", 
         "--use-query-log=solver:smt2", "--simplify-sym-indices",
         f"-max-time={MAX_KLEE_TIME}", "--kdalloc",
         driver_obj

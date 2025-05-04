@@ -17,28 +17,14 @@ Optional / repeatable
 --symbolic "type name"           (in main)
 --concrete "stmt;"               (emitted inside main)
 --global   "type name"           (file-scope declaration before main)
-
-Example
--------
-python3 setup_driver.py \\
-  --entry-src   Testcases/Sample2Tests/CharConverter/CharConverter.c \\
-  --entry-func  Iconv \\
-  --vuln        OOB_WRITE \\
-  --assert-line 146 \\
-  --target-src  Testcases/Sample2Tests/CharConverter/CharConverter.c \\
-  -g          "unsigned OutputBuffer_cap" \\
-  --symbolic  "unsigned OutputBuffer_cap" "CHAR8 **OutputBuffer" \\
-  --concrete  "*OutputBuffer = malloc(OutputBuffer_cap);" \\
-              "klee_make_symbolic(*OutputBuffer, OutputBuffer_cap, \\\"OutputBuffer_data\\\");" \\
-              "klee_assume(OutputBuffer_cap>=1 && OutputBuffer_cap<=4096);" \\
-  --assertion "OutIndex < OutputBuffer_cap"
+--malloc PTR SZ                 (preallocate inner buffer for T**)
+--default-malloc <size|0>       (default allocation size for any T** without explicit malloc)
 """
 
 import argparse, os, re
 from pathlib import Path
 
 SIG_RE = r'{}\s*\((.*?)\)'          # filled with entry-func
-
 
 # ---------------------------------------------------------------- helpers
 def sig_info(src: Path, fn: str):
@@ -54,38 +40,24 @@ def sig_info(src: Path, fn: str):
         names.append(parts[-1].lstrip('*').rstrip('[]'))
     return decls, names
 
-
 def local_hdrs(src: Path):
     return [l.strip() for l in src.read_text(errors='ignore').splitlines()
             if l.strip().startswith('#include') and '"' in l]
 
-
 def clean_old_asserts(path: Path):
-    """
-    Remove every line that already contains a KLEE assertion.
-    Called before we splice-in the fresh assertion so we never double-instrument.
-    """
     src = path.read_text(errors='ignore').splitlines()
     cleaned = [ln for ln in src if "klee_assert(" not in ln]
     if len(cleaned) != len(src):
         path.write_text("\n".join(cleaned))
 
 def inject_assert(path: Path, ln: int, expr: str):
-    """
-    • drop any previous klee_assert(...) lines first
-    • then insert  '    klee_assert(expr);'  **before** the 1-based line <ln>
-    """
     clean_old_asserts(path)
-
     lines = path.read_text(errors='ignore').splitlines()
-    # avoid duplicate insert of exactly the same assertion text
     if any(expr in L for L in lines):
         return
-
-    insert_at = max(0, ln - 1)          # convert 1-based → 0-based, keep ≥0
+    insert_at = max(0, ln - 1)
     lines.insert(insert_at, f"    klee_assert({expr});")
     path.write_text("\n".join(lines))
-
 
 # ---------------------------------------------------------------- main
 def main():
@@ -100,24 +72,23 @@ def main():
     req.add_argument("--assertion",   required=True)
 
     rep = ap.add_argument_group("repeatable / optional")
-    rep.add_argument("--symbolic", action='append', default=[],
-                     help='declare symbolic var inside main()')
-    rep.add_argument("--concrete", action='append', default=[],
-                     help='verbatim stmt inside main()')
-    rep.add_argument("-g", "--global", dest="globals_", action='append',
-                     default=[], help='file-scope declaration')
+    rep.add_argument("--symbolic", action='append', default=[])
+    rep.add_argument("--concrete", action='append', default=[])
+    rep.add_argument("-g", "--global", dest="globals_", action='append', default=[])
+    rep.add_argument("--malloc", nargs=2, action='append', default=[])
+    rep.add_argument("--default-malloc", type=int, default=0)
 
     args = ap.parse_args()
+
+    malloc_map = {ptr: int(sz) for ptr, sz in args.malloc}
 
     sg_root   = Path("../stase_generated")
     src_root  = sg_root / "instrumented_source"
     entry_abs = src_root / args.entry_src
     target_abs= src_root / args.target_src
 
-    # ---------------------------------------------------------------- assert
     inject_assert(target_abs, args.assert_line, args.assertion)
 
-    # ---------------------------------------------------------------- driver
     inputs_dir = Path("../inputs"); inputs_dir.mkdir(exist_ok=True)
     drv_path   = inputs_dir / f"klee_driver_{args.entry_func}_{args.vuln}_{args.assert_line}.c"
 
@@ -131,7 +102,6 @@ def main():
 
     with drv_path.open('w') as f:
         W = f.write
-        # ------- includes --------------------------------------------------
         W(f"// Auto-generated driver for {args.entry_func}\n")
         W('#include "../stase_generated/global_stubs.h"\n')
         W('#include "../stase_generated/global_stub_defs.c"\n')
@@ -143,20 +113,16 @@ def main():
             hdr = inc.split('"')[1]
             W(f'#include "{os.path.relpath((inc_dir / hdr).resolve(), drv_path.parent)}"\n')
 
-        # ------- user-requested globals -----------------------------------
         if args.globals_:
             W('\n// ----- user globals -----\n')
             for g in args.globals_:
                 W(f'{g};\n')
 
-        # ------- instrumented source --------------------------------------
         W('\n// Instrumented entry-point source\n')
         W(f'#include "{os.path.relpath(target_abs, drv_path.parent)}"\n\n')
 
-        # =========================  main() ================================
         W('int main(void) {\n')
 
-        # --- symbolic declarations ---------------------------------------
         if args.symbolic:
             W('    // Symbolic variables\n')
             for decl in args.symbolic:
@@ -168,42 +134,46 @@ def main():
                 elif '**' in decl:
                     base_t = ' '.join(decl.split()[:-1]).replace('*', '').strip()
                     ptr_nm = raw.lstrip('*')
+                    inner_sz = malloc_map.get(ptr_nm, args.default_malloc)
                     W(f'    {decl} = malloc(sizeof({base_t} *));\n')
+                    if inner_sz:
+                        W(f'    *{ptr_nm} = malloc({inner_sz});\n')
+                        W(f'    klee_make_symbolic(*{ptr_nm}, {inner_sz}, "{ptr_nm}_data");\n')
                     W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t} *), "{ptr_nm}");\n')
                 elif '*' in decl:
                     base_t = ' '.join(decl.split()[:-1]).replace('*', '').strip()
                     ptr_nm = raw.lstrip('*')
-                    W(f'    {decl} = malloc(sizeof({base_t}));\n')
-                    W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t}), "{ptr_nm}");\n')
+                    malloc_sz = malloc_map.get(ptr_nm, None)
+                    if malloc_sz:
+                        W(f'    {decl} = malloc({malloc_sz});\n')
+                        W(f'    klee_make_symbolic({ptr_nm}, {malloc_sz}, "{ptr_nm}");\n')
+                    else:
+                        W(f'    {decl} = malloc(sizeof({base_t}));\n')
+                        W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t}), "{ptr_nm}");\n')
+
                 else:
-                    # scalar; decl may already exist globally – skip re-decl
                     if raw not in glob_set:
                         W(f'    {decl};\n')
                     W(f'    klee_make_symbolic(&{raw}, sizeof({raw}), "{raw}");\n')
 
-        # --- entry-point parameters --------------------------------------
         if pdecl:
             W('\n    // Entry-point parameters (default init)\n')
             for d, n in zip(pdecl, pnam):
                 if n not in sym_set and n not in glob_set:
                     W(f'    {d} = {"NULL" if "*" in d else "0"};\n')
 
-        # --- concrete user statements ------------------------------------
         if args.concrete:
             W('\n    // Concrete initialisation / constraints\n')
             for stmt in args.concrete:
                 W(f'    {stmt}\n')
 
-        # --- call ---------------------------------------------------------
         W('\n    // Call entry-point\n')
         W(f'    {args.entry_func}({", ".join(pnam)});\n')
         W('    return 0;\n}\n')
 
-    # ---------------------------------------------------------------- info
     print(f"[✓] Driver  : {drv_path.resolve()}")
     rel_t = target_abs.relative_to(sg_root)
     print(f"[✓] Assert  : inserted before line {args.assert_line} in {rel_t}")
 
-# -------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
