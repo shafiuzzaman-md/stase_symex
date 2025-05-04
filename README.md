@@ -21,7 +21,7 @@ STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution 
 | Report name               | Type / format | Description      |
 | ------------------------- | ------------- | -------------------------------------------------------------------------- |
 | **`stase_output/*.txt`** | Human‑readable pre‑/post‑condition | Precondition + postcondition for each violated assertion  |
-| **`formatted_output/*.json`**   | JSON | Machine-parseable bug report (type, file, line, symbolic variables)|
+| **`formatted_output/*.json`**   | JSON | Machine-parseable bug report (type, file, line, variables, assertion, precondition|
 
 ---
 

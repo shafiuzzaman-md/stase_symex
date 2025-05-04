@@ -3,7 +3,7 @@ import re
 import os
 import glob
 
-def extract_data_from_content(content, input_file):
+def extract_data_from_content(content, input_file=""):
     # Extract assertion expression
     assertion_match = re.search(r"ASSERTION FAIL: (.+)", content)
     assertion_expr = assertion_match.group(1).strip() if assertion_match else ""
@@ -19,9 +19,9 @@ def extract_data_from_content(content, input_file):
     # Extract vulnerability type from driver file name
     vuln_type = ""
     base_name = os.path.basename(input_file)
-    type_match = re.search(r'_([A-Z_]+)_\d+\.txt$', base_name)
-    if type_match:
-        vuln_type = type_match.group(1)
+    type_match = re.search(r'_([A-Z_]+)_\d+(?:_output)?\.txt$', base_name)
+    vuln_type = type_match.group(1) if type_match else ""
+
 
     # Extract preconditions from "Preconditions:\n...Postconditions:"
     precondition = ""
