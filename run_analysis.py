@@ -3,6 +3,9 @@
 import os
 import sys
 import subprocess
+from glob import glob
+from extract_signature import extract_and_combine
+from parse_output import convert_file_to_json
 
 # Load settings from stase_generated
 sys.path.insert(0, os.path.abspath("../stase_generated"))
@@ -10,42 +13,52 @@ from settings import CLANG_PATH, KLEE_PATH
 
 OUT_DIR = "../stase_generated"
 DRIVER_DIR = os.path.join(OUT_DIR, "generated_klee_drivers")
-STUB_DEF = os.path.join(OUT_DIR, "global_stub_defs.c")
+OUTPUT_TXT_DIR = os.path.abspath(os.path.join(OUT_DIR, os.pardir, "stase_output"))
+OUTPUT_JSON_DIR = os.path.abspath(os.path.join(OUT_DIR, os.pardir, "formatted_output"))
 
-# Parse input arguments
-if len(sys.argv) not in [2, 3]:
-    print("Usage: python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]")
-    sys.exit(1)
+os.makedirs(OUTPUT_TXT_DIR, exist_ok=True)
+os.makedirs(OUTPUT_JSON_DIR, exist_ok=True)
 
-input_driver = sys.argv[1]
-MAX_KLEE_TIME = int(sys.argv[2]) if len(sys.argv) == 3 else 5
+def compile_driver(input_driver):
+    os.makedirs(DRIVER_DIR, exist_ok=True)
+    base = os.path.basename(input_driver)
+    name = os.path.splitext(base)[0]
+    output_bc = os.path.join(DRIVER_DIR, f"{name}.bc")
+    subprocess.run([
+        CLANG_PATH, "-emit-llvm", "-c", "-g", "-O0", "-Xclang", "-disable-O0-optnone",
+        input_driver, "-o", output_bc
+    ], check=True)
+    return name, output_bc
 
-# Paths
-os.makedirs(DRIVER_DIR, exist_ok=True)
-driver_base = os.path.splitext(os.path.basename(input_driver))[0]
-driver_obj = os.path.join(DRIVER_DIR, f"{driver_base}.bc")
-
-# Step 1: Compile driver to LLVM bitcode
-print("[+] Compiling driver to LLVM bitcode...")
-subprocess.run([
-    CLANG_PATH, "-emit-llvm", "-c", "-g", "-O0",
-    "-Xclang", "-disable-O0-optnone",
-    input_driver,
-    "-o", driver_obj
-], check=True)
-
-# Step 2: Run KLEE symbolic execution
-print(f"[+] Running KLEE symbolic execution with timeout {MAX_KLEE_TIME} seconds...")
-
-def run_klee():
-    return subprocess.run([
+def run_klee(bitcode_file, timeout):
+    subprocess.run([
         KLEE_PATH, "--external-calls=all", "-libc=uclibc", "--posix-runtime",
-        "--smtlib-human-readable", "--write-test-info", "--write-paths",
-        "--write-smt2s", "--write-cov", "--write-cvcs", "--write-kqueries",
-        "--write-sym-paths", 
-        "--use-query-log=solver:smt2", "--simplify-sym-indices",
-        f"-max-time={MAX_KLEE_TIME}", "--kdalloc",
-        driver_obj
-    ])
+        "--smtlib-human-readable", "--write-test-info", "--write-paths", "--write-smt2s",
+        "--write-cov", "--write-cvcs", "--write-kqueries", "--write-sym-paths",
+        "--use-query-log=solver:smt2", "--simplify-sym-indices", "--kdalloc",
+        f"-max-time={timeout}", bitcode_file
+    ], check=True)
 
-run_klee()
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 run_analysis.py <driver.c> [timeout] | --batch")
+        sys.exit(1)
+
+    timeout = 5
+    if sys.argv[1] == "--batch":
+        drivers = glob("../inputs/klee_driver_*.c")
+    else:
+        drivers = [sys.argv[1]]
+        if len(sys.argv) == 3:
+            timeout = int(sys.argv[2])
+
+    for driver in drivers:
+        print(f"[+] Processing: {driver}")
+        name, bc = compile_driver(driver)
+        run_klee(bc, timeout)
+        extract_and_combine(driver, f"{name}_output.txt")
+        convert_file_to_json(os.path.join(OUTPUT_TXT_DIR, f"{name}_output.txt"), OUTPUT_JSON_DIR)
+        print(f"[✓] Done: {name}\n")
+
+if __name__ == "__main__":
+    main()

@@ -20,8 +20,8 @@ STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution 
   
 | Report name               | Type / format | Description      |
 | ------------------------- | ------------- | -------------------------------------------------------------------------- |
-| **`report_pre_post.txt`** | Human‑readable pre‑/post‑condition dump | Failing path preconditions (symbolic constraints) and postcondition (assert-fail with location)  |
-| **`report_vulns.json`**   | Machine‑readable JSON | JSON list of violated assertions with type, file, line, variables, and constraint query |
+| **`stase_output/*.txt`** | Human‑readable pre‑/post‑condition | Precondition + postcondition for each violated assertion  |
+| **`formatted_output/*.json`**   | JSON | Machine-parseable bug report (type, file, line, symbolic variables)|
 
 ---
 
@@ -91,10 +91,11 @@ inputs/klee_driver_Iconv_OOB_WRITE_146.c
 stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
 ```
 
-## Step 3: Run Symbolic Analysis
+## Step 3: Run Analysis
 
 Once the driver and assertion are ready:
 
+### Single Driver
 ```
 python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
 
@@ -105,16 +106,21 @@ Example:
 python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c 
 ```
 
+###  Batch Mode (all drivers under inputs/)
+```
+python3 run_analysis.py --batch
+
+```
 Output appears under `stase_generated/klee-out-*`
 
 ## Step 4: Human-in-the-loop edits (if needed)
-Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and rerun when needed:
+Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and re‑run Step 3  (run_analysis.py) when needed:
 
 | Scenario                                                  | Action| 
 |-----------------------------------------------------------|------ |
-| `undefined reference` error| Add stubs for missing external or platform-specific functions above `main()` in the driver; re‑run Step 3  (run_analysis.py).|
-|No new paths/ instant exit  | Loosen constraints: allocate buffers, widen `assume` and re‑run Step 3.|
-|No paths / KLEE runs indefinitely | Likely due to path explosion. Stub out irrelevant functions) and re‑run **Step 3**.|
+|KLEE: ERROR – `undefined reference`| Add stubs for missing external or platform-specific functions.|
+|KLEE finishes instantly  | Loosen constraints: widen assumptions, add more symbolic inputs.|
+|KLEE runs indefinitely | Likely due to path explosion. Stub out irrelevant functions, Harden constraints: narrow assumptions, limit malloc sizes |
 
 ##  Project Layout
 ```
