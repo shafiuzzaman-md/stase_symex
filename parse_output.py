@@ -3,12 +3,12 @@ import re
 import os
 import glob
 
-def extract_data_from_content(content):
-    # Extract assertion failure message
+def extract_data_from_content(content, filename=""):
+    # Extract assertion expression
     assertion_match = re.search(r"ASSERTION FAIL: (.+)", content)
-    assertion_fail = assertion_match.group(1).strip() if assertion_match else ""
+    assertion_expr = assertion_match.group(1).strip() if assertion_match else ""
 
-    # Extract file path and remove prefix if present
+    # Extract file path and strip prefix
     file_match = re.search(r"File:\s+(.*\.c)", content)
     file_path = file_match.group(1).strip() if file_match else ""
     file_path = re.sub(r"^.*?/stase_generated/instrumented_source/", "", file_path)
@@ -18,10 +18,20 @@ def extract_data_from_content(content):
     line_match = re.search(r"Line:\s+(\d+)", content)
     line = int(line_match.group(1)) if line_match else 0
 
+    # Infer type from filename (e.g., ..._OOB_WRITE_146.txt)
+    vuln_type = ""
+    if filename:
+        m = re.search(r'_([A-Z_]+)_\d+\.txt$', filename)
+        if m:
+            vuln_type = m.group(1)
 
-    if assertion_fail.startswith('!'):
-        assertion_fail = assertion_fail[1:].strip()
+    # Extract precondition (entire SMT query block under "Preconditions:")
+    precondition = ""
+    pre_match = re.search(r"Preconditions:\n(.*?)\n(?:Postconditions:|$)", content, re.DOTALL)
+    if pre_match:
+        precondition = pre_match.group(1).strip()
 
+    # Collect symbolic variables
     variables_set = set()
     standard_var_pattern = r"(\w+) : \w+ = symbolic"
     variables_set.update(re.findall(standard_var_pattern, content))
@@ -30,11 +40,14 @@ def extract_data_from_content(content):
     variables_set.update(f"array {v}" for v in re.findall(array_var_pattern, content))
 
     return {
-        "type": assertion_fail.strip(),
+        "type": vuln_type,
+        "assertion": assertion_expr,
         "file": file_name,
         "line": line,
-        "variables": list(variables_set)
+        "variables": sorted(variables_set),
+        "precondition": precondition
     }
+
 
 
 def convert_file_to_json(input_path_or_dir, output_folder):
@@ -49,7 +62,8 @@ def convert_file_to_json(input_path_or_dir, output_folder):
         with open(input_file, 'r') as file:
             content = file.read()
 
-        json_data = extract_data_from_content(content)
+        json_data = extract_data_from_content(content, filename=os.path.basename(input_file))
+
         output_file = os.path.join(output_folder, os.path.basename(input_file).replace('.txt', '.json'))
 
         with open(output_file, 'w') as file:
