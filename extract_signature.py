@@ -68,7 +68,9 @@ def extract_and_combine(source_filename, output_file_name):
     for line in postcondition_lines:
         post_text += f"{line}\n"
     if file_path:
-        post_text += f"{file_path}\n"
+        cleaned_path = re.sub(r'\.\./inputs/\.\./stase_generated/instrumented_source/', '', file_path)
+        post_text += f"{cleaned_path}\n"
+
     if assert_line:
         post_text += f"Line: {assert_line}\n"
 

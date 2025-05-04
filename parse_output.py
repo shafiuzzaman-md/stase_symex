@@ -4,13 +4,20 @@ import os
 import glob
 
 def extract_data_from_content(content):
-    file_line_pattern = r"KLEE: ERROR: (.+?):(\d+): ASSERTION FAIL: (.+)"
-    match = re.search(file_line_pattern, content)
-    if match:
-        path, line, assertion_fail = match.groups()
-        file = os.path.basename(path)
-    else:
-        file, line, assertion_fail = '', '', ''
+    # Extract assertion failure message
+    assertion_match = re.search(r"ASSERTION FAIL: (.+)", content)
+    assertion_fail = assertion_match.group(1).strip() if assertion_match else ""
+
+    # Extract file path and remove prefix if present
+    file_match = re.search(r"File:\s+(.*\.c)", content)
+    file_path = file_match.group(1).strip() if file_match else ""
+    file_path = re.sub(r"^.*?/stase_generated/instrumented_source/", "", file_path)
+    file_name = os.path.basename(file_path)
+
+    # Extract line number
+    line_match = re.search(r"Line:\s+(\d+)", content)
+    line = int(line_match.group(1)) if line_match else 0
+
 
     if assertion_fail.startswith('!'):
         assertion_fail = assertion_fail[1:].strip()
@@ -24,10 +31,11 @@ def extract_data_from_content(content):
 
     return {
         "type": assertion_fail.strip(),
-        "file": file,
-        "line": int(line) if line.isdigit() else 0,
+        "file": file_name,
+        "line": line,
         "variables": list(variables_set)
     }
+
 
 def convert_file_to_json(input_path_or_dir, output_folder):
     if os.path.isfile(input_path_or_dir):
