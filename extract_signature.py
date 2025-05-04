@@ -39,21 +39,42 @@ def extract_and_combine(source_filename, output_file_name):
         print(f"[!] Could not extract base folder name from .assert.err")
         return
 
-    # Gather postconditions
+    # Gather postconditions with assertion, file path, and line number
     postcondition_lines = []
+    file_path = None
+    assert_line = None
+
     for file in os.listdir(klee_dir):
         if file.endswith('.assert.err'):
             path = os.path.join(klee_dir, file)
             with open(path) as f:
-                for line in f:
+                lines = f.readlines()
+                for i, line in enumerate(lines):
                     if "ASSERTION FAIL:" in line:
-                        postcondition_lines.append(line)
+                        postcondition_lines.append(line.strip())
+                    elif line.startswith("File:"):
+                        file_path = line.strip()
+                    elif line.startswith("Line:"):
+                        m = re.search(r'Line:\s*(\d+)', line)
+                        if m:
+                            assert_line = m.group(1)
 
     if not postcondition_lines:
         print("[!] No assertion failures found")
         return
 
-    post_text = "Postconditions:\n" + simplify_smt_expressions("\n".join(postcondition_lines))
+    # Compose the postcondition text
+    post_text = "Postconditions:\n"
+    for line in postcondition_lines:
+        post_text += f"{line}\n"
+    if file_path:
+        post_text += f"{file_path}\n"
+    if assert_line:
+        post_text += f"Line: {assert_line}\n"
+
+    # Simplify it
+    post_text = simplify_smt_expressions(post_text)
+
 
     # Gather preconditions from a matching .kquery
     for file in os.listdir(klee_dir):
