@@ -57,7 +57,13 @@ python3 setup_driver.py \
 - `--symbolic` Declares and makes variables symbolic
 - `--concrete` Adds explicit initialization (malloc, assume, etc.)
 - `--malloc` Pre-allocates symbolic buffer for double pointers
-- `--default-malloc` Fallback size for unallocated double pointers
+- `--default-malloc` his option tells the system to automatically allocate a buffer of size N bytes for any double pointer (like CHAR8 **OutputBuffer) that hasn’t been manually allocated using --malloc.
+- `--global/-g` globals (visible to instrumented source).
+
+Outputs:
+
+- inputs/klee_driver___.c
+- Instrumented source with assertion
 
 
 ### 2.2  Example: Iconv OOB_WRITE
@@ -113,6 +119,23 @@ python3 run_analysis.py --batch
 ```
 Output appears under `stase_generated/klee-out-*`
 
+### Output:
+``` cd .. ```
+- `stase_output/*.txt`
+- `formatted_output/*.json`
+
+Example JSON Output
+```
+{
+  "type": "OOB_WRITE",
+  "file": "Testcases/Sample2Tests/CharConverter/CharConverter.c",
+  "line": 146,
+  "variables": ["OutputBuffer_cap", "InputBuffer", "InputSize"],
+  "assertion": "OutIndex < OutputBuffer_cap",
+  "precondition": "..."
+}
+```
+
 ## Step 4: Human-in-the-loop edits (if needed)
 Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and re‑run Step 3  (run_analysis.py) when needed:
 
@@ -139,6 +162,10 @@ project_root/
 │   └── settings.py
 ├── inputs/
 │   └── klee_driver_<...>.c             # User-prepared drivers
+├── stase_output/
+│   └── klee_driver_<...>_output.txt  
+├── formatted_output/
+│   └── klee_driver_<...>_output.json  
 └── (user's original source code placed anywhere)
 
 ```
