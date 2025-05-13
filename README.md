@@ -24,6 +24,8 @@ STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution 
 | **`formatted_output/*.json`**   | JSON | Machine-parseable bug report (type, file, line, variables, assertion, precondition|
 
 ---
+## Step 0: Install KLEE Symbolic Execution Engine 
+STASE uses KLEE as the underlying symbolic execution engine. Follow [these steps](install_klee.md) to install KLEE.
 
 ## Step 1: Setup Environment
 
