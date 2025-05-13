@@ -1,17 +1,36 @@
 # STASE Symbolic Execution Workflow (STASE_SYMEX)
 STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution to confirm vulnerabilities and extract path constraints that trigger them.
+```
+🟩 REQUIRED INPUTS                                 🔧 PROCESS: STASE_SYMEX Engine                                 📤 OUTPUTS
+┌────────────────────┐                  ┌──────────────────────────────────────────────────────────┐     ┌────────────────────────────┐
+│   Source Code      │                  │  setup_environment.py                                    │     │ Human-readable Report      │
+│ (UEFI / Kernel)    ├────┬────────────▶│                                                          ├────▶│ stase_output/*.txt         │
+└────────────────────┘    │             │  setup_driver.py                                         │     │ (Pre/Post conditions)      │
+                          │             │  ├─ Generates KLEE driver with symbolic inputs           │     └────────────────────────────┘
+┌────────────────────────────┐          │  ├─ Inserts klee_assert at specified vulnerability lines │
+│ Static Analysis Output     ├────┐     │  └─ Includes symbolic/concrete vars, memory models       │     ┌────────────────────────────┐
+│ (entry, vuln, line, etc.)  │    └────▶│                                                          ├────▶│ Machine-readable Report    │
+└────────────────────────────┘          │  (Optional) Manual stub insertion into the driver        │     │ formatted_output/*.json    │
+ 🟨 OPTIONAL INPUTS                     │                                                          │     │ (type, file, line, vars...)│
+┌──────────────────────────┐            │  run_analysis.py                                         │     └────────────────────────────┘
+│ Hand-edited Driver Stubs │───────────▶│  └── Invokes KLEE for symbolic execution                 │
+│ • Unresolved symbols     │            └──────────────────────────────────────────────────────────┘
+│ • Uninteresting functions│
+│ • Concretization logic   │
+└──────────────────────────┘
 
+
+```
 ---
 
-## Input
 
-| Item                         | Notes                                                                 |
+###  Input
+
+| Artifact                     |Description                                                            |
 |------------------------------|-----------------------------------------------------------------------|
-| Source tree                  | Any UEFI / kernel-module code base                                    |
-| Vulnerability type           | `OOB_WRITE`, `WWW` (write-what-where) or `CFH` (control-flow hijack)  |
-| Assertion location           | Line number of the vulnerable instruction (in `--target-src`)         |
-| Driver `.c` (under `inputs/`)| Generated via `setup_driver.py`; contains entrypoint call, symbolic variables, and stubs, then hand-edited for any extra stubs |
-
+|  Source code                 | EDK2 / Linux source tree                                                 |
+| Static-analysis result       | Entrypoint, attacker-controlled variables, vulnerability type, vulnerability location|
+| (Optional) Hand-edited driver stubs (under `inputs/`)| KLEE drivers are generated from static analysis results via `setup_driver.py`; contains entrypoint call, symbolic variables, and stubs, then hand-edited for any extra stubs |
 ---
 
 ## Output
@@ -27,7 +46,7 @@ STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution 
 ## Step 0: Install KLEE Symbolic Execution Engine 
 STASE uses KLEE as the underlying symbolic execution engine. Follow [these steps](install_klee.md) to install KLEE.
 
-## Step 1: Setup Environment
+## **1. Setup (One Time Only)**
 
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
@@ -36,11 +55,12 @@ python3 setup_environment.py <source-code-location> <clang-path> <klee-path>
 ```
 Example on EDK II:
 ```
-python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+python3 setup_edk2_environment.py ../eval2_edk2-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
 
-## Step 2: Setup Driver and Instrument code
-### 2.1  Quick reference
+## **2. For Each Vulnerability**
+### **2.1 Generate Driver and Insert Assertion**
+#### 2.1  Quick reference
 Run once for each vulnerability detected by static analysis to generate a KLEE driver and insert assertion.
 ```
 python3 setup_driver.py \
@@ -68,7 +88,7 @@ Outputs:
 - Instrumented source with assertion
 
 
-### 2.2  Example: Iconv OOB_WRITE
+#### 2.2  Example: Iconv OOB_WRITE
 ```
 python3 setup_driver.py \
   --entry-src   Testcases/Sample2Tests/CharConverter/CharConverter.c \
@@ -99,11 +119,11 @@ inputs/klee_driver_Iconv_OOB_WRITE_146.c
 stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
 ```
 
-## Step 3: Run Analysis
+### Step 3: Run Analysis
 
 Once the driver and assertion are ready:
 
-### Single Driver
+#### Single Driver
 ```
 python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
 
@@ -114,14 +134,14 @@ Example:
 python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c 
 ```
 
-###  Batch Mode (all drivers under inputs/)
+####  Batch Mode (all drivers under inputs/)
 ```
 python3 run_analysis.py --batch
 
 ```
 Output appears under `stase_generated/klee-out-*`
 
-### Output:
+#### Output:
 ``` cd .. ```
 - `stase_output/*.txt`
 - `formatted_output/*.json`
@@ -138,7 +158,7 @@ Example JSON Output
 }
 ```
 
-## Step 4: Human-in-the-loop edits (if needed)
+### Step 4: Human-in-the-loop edits (if needed)
 Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and re‑run Step 3  (run_analysis.py) when needed:
 
 | Scenario                                                  | Action| 
