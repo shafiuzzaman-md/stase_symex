@@ -1,3 +1,22 @@
+# STASE
+STASE (STatic Analysis guided Symbolic Execution) is a two-phase analysis framework designed to detect and confirm emergent operations/ weird instructions. Each phase can be run independently or together in sequence.
+
+**Phase 1:  Rule-based Static Analysis (STASE_RbSA):** This phase identifies vulnerabilities using rule-based static analysis.
+
+| Artifact   | Description                                         |
+| ---------- | --------------------------------------------------- |
+| **Input**  | Source code |
+| **Output** | Vulnerability reports in .csv and .json|
+
+**Phase 2:  Guided Symbolic Execution (STASE_SYMEX):** Using the results of STASE_RbSA, this phase generates and runs KLEE-based symbolic execution harnesses to confirm whether vulnerabilities are real and extract precise path constraints (preconditions and postconditions).
+
+| Artifact   | Description                                         |
+| ---------- | --------------------------------------------------- |
+| **Input**  | Source code, Static analysis output, (Optional) Driver stubs |
+| **Output** | Vulnerability reports in .txt and .json|
+
+
+
 # STASE Symbolic Execution Workflow (STASE_SYMEX)
 STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution to confirm vulnerabilities and extract path constraints that trigger them.
 ```
