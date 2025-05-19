@@ -81,7 +81,7 @@ python3 setup_kernel_environment.py <source-code-location> <clang-path> <klee-pa
 Example on EDK II:
 ```
 # from stase_symex/
-python3 setup_edk2_environment.py ../eval2_edk2-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
 Example on kernel:
 ```
@@ -120,7 +120,8 @@ Outputs:
 - Instrumented source with assertion
 
 
-#### 2.2  Example: Iconv OOB_WRITE
+#### Examples
+##### 2.2.1  Iconv OOB_WRITE
 ```
 python3 setup_driver.py \
   --entry-src   Testcases/Sample2Tests/CharConverter/CharConverter.c \
@@ -151,6 +152,18 @@ inputs/klee_driver_Iconv_OOB_WRITE_146.c
 stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
 ```
 
+##### 2.2.2  kbmi_net Stack STACK_EXECUTABLE
+```
+python3 setup_driver.py \
+  --entry-src   drivers/kbmi_net/kbmi_net.c \
+  --entry-func  kbmi_net_init \
+  --vuln        STACK_EXECUTABLE \
+  --assert-line 79 \
+  --target-src  drivers/kbmi_usb/kbmi_usb.c \
+  -g           "unsigned OutputBuffer_cap" \
+  --assertion  "0"
+```
+
 ### Step 3: Run Analysis
 
 Once the driver and assertion are ready:
@@ -164,6 +177,7 @@ python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
 Example:
 ```
 python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c 
+python3 run_analysis.py ../inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c 
 ```
 
 ####  Batch Mode (all drivers under inputs/)

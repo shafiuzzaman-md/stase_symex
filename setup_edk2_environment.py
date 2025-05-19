@@ -1,12 +1,36 @@
 #!/usr/bin/env python3
+import subprocess, sys, os, shutil, pathlib, glob, re
+from pathlib import Path 
+# -------------------------------------------------------------------------
+# rolling work-dir  stase_generated_<N>   +  alias  stase_generated_last
+# -------------------------------------------------------------------------
+def next_workspace(base="stase_generated"):
+    """
+    Return a fresh   ../stase_generated_<N>   directory and update
+    ../stase_generated_last → <newdir> .  N is the first non-existing integer.
+    """
+    base_parent = pathlib.Path("..").resolve()
 
-import subprocess
-import sys
-import os
-import shutil
+    n = 0
+    while True:
+        candidate = base_parent / f"{base}_{n}"
+        if not candidate.exists():
+            candidate.mkdir(parents=True)           # ← create the fresh one
+            break
+        n += 1                                      # otherwise try next number
 
-OUTPUT_DIR = "../stase_generated"
+    alias = base_parent / f"{base}_last"
+    if alias.is_symlink() or alias.exists():
+        alias.unlink()
+    alias.symlink_to(candidate, target_is_directory=True)
+
+    print(f"[+] Workspace  {candidate.name}  created  (alias {alias.name} updated)")
+    return candidate
+
+
+OUTPUT_DIR = str(next_workspace())
 INSTRUMENTED_SOURCE_DIR = os.path.join(OUTPUT_DIR, "instrumented_source")
+
 
 def write_settings_file(clang_path, klee_path):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -46,6 +70,16 @@ def main():
     validate_file(klee_path, "KLEE")
 
     copy_source_tree(source_dir)
+
+    # ---- copy the EDK-specific helper stub into the workspace ------------
+    helper_src = Path(__file__).with_name("uefi_helper_stubs.c")   # master copy
+    helper_dst = Path(OUTPUT_DIR) / "uefi_helper_stubs.c"          # per-run copy
+    if helper_src.exists():
+        shutil.copy(helper_src, helper_dst)
+        print(f"[✓] helper stub copied → {helper_dst.relative_to(Path(OUTPUT_DIR).parent)}")
+    # ----------------------------------------------------------------------
+
+    
     write_settings_file(clang_path, klee_path)
 
     print("[+] Rewriting #include <...> to #include \"...\"...")

@@ -14,7 +14,39 @@ Produces:
 
 import os, sys, shutil, re, pathlib, subprocess, textwrap
 
-OUT_ROOT   = pathlib.Path("../stase_generated").resolve()
+# -------------------------------------------------------------------------
+# 1) choose a fresh work-dir   ../stase_generated_<N>
+# 2) keep symlink ../stase_generated_last → newest one
+# -------------------------------------------------------------------------
+import pathlib, re, glob
+
+def next_workspace(base="stase_generated"):
+    parent = pathlib.Path("..").resolve()
+
+    # collect existing “…/<base>_<number>” directories
+    pat = re.compile(rf"^{re.escape(base)}_(\d+)$")
+    nums = []
+    for p in parent.iterdir():
+        m = pat.match(p.name)
+        if m and p.is_dir():
+            nums.append(int(m.group(1)))
+
+    new_n   = (max(nums) + 1) if nums else 0
+    new_dir = parent / f"{base}_{new_n}"
+    new_dir.mkdir(parents=True, exist_ok=False)
+
+    # (re)point “…/<base>_last” symlink to the brand-new directory
+    alias = parent / f"{base}_last"
+    if alias.exists() or alias.is_symlink():
+        alias.unlink()
+    alias.symlink_to(new_dir, target_is_directory=True)
+
+    print(f"[+] Workspace  {new_dir.name}  created  (alias {alias.name} updated)")
+    return new_dir
+
+
+# workspace for **this** run
+OUT_ROOT   = next_workspace()
 SRC_OUT    = OUT_ROOT / "instrumented_source"
 STUB_C     = OUT_ROOT / "kernel_stub_defs.c"
 STUB_H     = OUT_ROOT / "kernel_stubs.h"

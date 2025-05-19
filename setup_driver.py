@@ -65,8 +65,7 @@ def main():
     req = ap.add_argument_group("required")
     req.add_argument("--entry-src",   required=True)
     req.add_argument("--entry-func",  required=True)
-    req.add_argument("--vuln",        required=True,
-                     choices=["OOB_WRITE", "WWW", "CFH"])
+    req.add_argument("--vuln",        required=True)
     req.add_argument("--assert-line", required=True, type=int)
     req.add_argument("--target-src",  required=True)
     req.add_argument("--assertion",   required=True)
@@ -82,7 +81,7 @@ def main():
 
     malloc_map = {ptr: int(sz) for ptr, sz in args.malloc}
 
-    sg_root   = Path("../stase_generated")
+    sg_root   = Path("../stase_generated_last")
     src_root  = sg_root / "instrumented_source"
     entry_abs = src_root / args.entry_src
     target_abs= src_root / args.target_src
@@ -103,11 +102,21 @@ def main():
     with drv_path.open('w') as f:
         W = f.write
         W(f"// Auto-generated driver for {args.entry_func}\n")
-        W('#include "../stase_generated/global_stubs.h"\n')
-        W('#include "../stase_generated/global_stub_defs.c"\n')
-        W('#include "../stase_symex/uefi_helper_stubs.c"\n')
+
+        # ---- EDK-II specific helpers (included only if they exist) -------------
+        edk_headers = [
+            ("../stase_generated_last/global_stubs.h",      sg_root / "global_stubs.h"),
+            ("../stase_generated_last/global_stub_defs.c",  sg_root / "global_stub_defs.c"),
+            ("../stase_generated_last/uefi_helper_stubs.c", sg_root / "uefi_helper_stubs.c")
+        ]
+        for inc_str, inc_path in edk_headers:
+            if inc_path.exists():                      # skip in kernel-only projects
+                W(f'#include "{inc_str}"\n')
+        # ------------------------------------------------------------------------
+
         W('#include "../stase_symex/klee/klee.h"\n')
         W('#include <string.h>\n#include <stdlib.h>\n')
+
 
         for inc in hdrs:
             hdr = inc.split('"')[1]
