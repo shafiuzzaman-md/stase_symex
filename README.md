@@ -69,12 +69,25 @@ STASE uses KLEE as the underlying symbolic execution engine. Follow [these steps
 
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
+### edk2:
 ```
-python3 setup_environment.py <source-code-location> <clang-path> <klee-path>
+python3 setup_edk2_environment.py <source-code-location> <clang-path> <klee-path>
 ```
+### kernel:
+```
+python3 setup_kernel_environment.py <source-code-location> <clang-path> <klee-path>
+```
+
 Example on EDK II:
 ```
+# from stase_symex/
 python3 setup_edk2_environment.py ../eval2_edk2-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+```
+Example on kernel:
+```
+# from stase_symex/
+python3 setup_kernel_environment.py  ../eval2_linux-main /usr/lib/llvm-14/bin/clang   /home/shafi/klee_build/bin/klee
+
 ```
 
 ## **2. For Each Vulnerability**
