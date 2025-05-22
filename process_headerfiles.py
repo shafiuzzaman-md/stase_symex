@@ -2,64 +2,86 @@
 import os
 import re
 import sys
+from collections import defaultdict
 
-def find_exact_file(directories, filename):
+INCLUDE_PATTERN = re.compile(r'^\s*#include\s+<(.+?)>')
+
+def index_files(directories):
+    file_index = defaultdict(list)
     for directory in directories:
-        for root, dirs, files in os.walk(directory):
-            if filename in files:
-                return os.path.join(root, filename)
-    return None
-
-def find_exact_file_in_directory(directories, filename, target_directory):
-    for directory in directories:
-        for root, dirs, files in os.walk(directory):
-            if filename in files and os.path.basename(root) == target_directory:
-                return os.path.join(root, filename)
-    return None
-
-def find_pattern_in_file(file_path, pattern):
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-    return [(line_number, line.strip()) for line_number, line in enumerate(lines, start=1) if re.search(pattern, line)]
-
-def replace_line_with_exact_path(file_path, line_number, new_line):
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-    lines[line_number - 1] = new_line + '\n'
-    with open(file_path, 'w') as file:
-        file.writelines(lines)
-
-def process_directories(targets):
-    pattern = r'^\s*#include\s+<(.+?)>'
-
-    for current_directory in targets:
-        for root, dirs, files in os.walk(current_directory):
+        for root, _, files in os.walk(directory):
             for file in files:
-                if file.endswith((".c", ".h")):
-                    file_path = os.path.join(root, file)
-                    print(f"\n[Processing] {file_path}")
-                    matches = find_pattern_in_file(file_path, pattern)
+                file_index[file].append(os.path.join(root, file))
+    return file_index
 
-                    for line_number, line in matches:
-                        match = re.search(pattern, line)
-                        if not match:
-                            continue
+def resolve_include(file_index, base_filename, include_dir):
+    candidates = file_index.get(base_filename, [])
+    if not include_dir:
+        return candidates[0] if candidates else None
+    for path in candidates:
+        if os.path.basename(os.path.dirname(path)) == include_dir:
+            return path
+    return None
 
-                        full_path = match.group(1)
-                        base_filename = os.path.basename(full_path)
-                        include_dir = os.path.dirname(full_path)
+def find_include_lines(file_path):
+    matches = []
+    try:
+        with open(file_path, 'r') as f:
+            for i, line in enumerate(f, 1):
+                if INCLUDE_PATTERN.search(line):
+                    matches.append((i, line.strip()))
+    except Exception as e:
+        print(f"[Error] Skipping {file_path}: {e}")
+    return matches
 
-                        if include_dir:
-                            resolved_path = find_exact_file_in_directory(targets, base_filename, include_dir)
-                        else:
-                            resolved_path = find_exact_file(targets, base_filename)
+def replace_line(file_path, line_number, new_line):
+    try:
+        with open(file_path, 'r') as f:
+            lines = f.readlines()
+        if lines[line_number - 1].strip() == new_line.strip():
+            return False
+        lines[line_number - 1] = new_line + '\n'
+        with open(file_path, 'w') as f:
+            f.writelines(lines)
+        return True
+    except Exception as e:
+        print(f"[Error] Could not update {file_path}: {e}")
+        return False
 
-                        if resolved_path:
-                            rel_path = os.path.relpath(resolved_path, os.path.dirname(file_path)).replace("\\", "/")
-                            replace_line_with_exact_path(file_path, line_number, f'#include "{rel_path}"')
+def process_directories(directories):
+    file_index = index_files(directories)
+    print("[+] File index built.")
+
+    for current_directory in directories:
+        for root, _, files in os.walk(current_directory):
+            for file in files:
+                if not file.endswith((".c", ".h")):
+                    continue
+
+                file_path = os.path.join(root, file)
+                include_matches = find_include_lines(file_path)
+
+                if not include_matches:
+                    continue
+
+                print(f"\n[Processing] {file_path}")
+                for line_number, line in include_matches:
+                    match = INCLUDE_PATTERN.search(line)
+                    if not match:
+                        continue
+
+                    full_path = match.group(1)
+                    base_filename = os.path.basename(full_path)
+                    include_dir = os.path.dirname(full_path)
+
+                    resolved = resolve_include(file_index, base_filename, include_dir)
+                    if resolved:
+                        rel_path = os.path.relpath(resolved, os.path.dirname(file_path)).replace("\\", "/")
+                        success = replace_line(file_path, line_number, f'#include "{rel_path}"')
+                        if success:
                             print(f"  → Line {line_number}: replaced with #include \"{rel_path}\"")
-                        else:
-                            print(f"  × Could not resolve: {full_path}")
+                    else:
+                        print(f"  × Line {line_number}: could not resolve {full_path}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
