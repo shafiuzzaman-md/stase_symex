@@ -160,7 +160,9 @@ python3 setup_driver.py \
   --vuln        STACK_EXECUTABLE \
   --assert-line 79 \
   --target-src  drivers/kbmi_usb/kbmi_usb.c \
-  -g           "unsigned OutputBuffer_cap" \
+  -g           "#define NOTIFY_OK 0" \
+  -g           "char message_buffer[1024]" \
+  --symbolic   "char message_buffer[MESSAGE_SIZE]" \
   --assertion  "0"
 ```
 
