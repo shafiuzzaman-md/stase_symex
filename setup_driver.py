@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-setup_driver.py – generate a KLEE driver *and* inject a user-supplied
-assertion in an instrumented source file.
+setup_driver.py – generate a KLEE driver (assertion instrumentation removed)
 
 Mandatory flags
 ---------------
 --entry-src   <rel-path>   C file that contains the entry-point
 --entry-func  <symbol>     Entry-point function name (e.g. Iconv)
 --vuln        <OOB_WRITE|WWW|CFH>
---assert-line <N>          Line (in --target-src) to put the assertion *before*
---target-src  <rel-path>   Source file where assertion goes
---assertion   "<expr>"     Expression for klee_assert(...)
+--assert-line <N>          Line number for naming only (assertion is not inserted)
+--target-src  <rel-path>   Source file related to the driver (used for header includes)
 
 Optional / repeatable
 ---------------------
@@ -24,12 +22,11 @@ Optional / repeatable
 import argparse, os, re
 from pathlib import Path
 
-SIG_RE = r'{}\s*\((.*?)\)'          # filled with entry-func
+SIG_RE = r'{}\s*\((.*?)\)'  # filled with entry-func
 
-# ---------------------------------------------------------------- helpers
 def sig_info(src: Path, fn: str):
     txt = src.read_text(errors='ignore')
-    m   = re.search(SIG_RE.format(re.escape(fn)), txt, re.DOTALL)
+    m = re.search(SIG_RE.format(re.escape(fn)), txt, re.DOTALL)
     if not m:
         return [], []
     args = [a.strip() for a in m.group(1).replace('\n', ' ').split(',') if a.strip()]
@@ -44,31 +41,14 @@ def local_hdrs(src: Path):
     return [l.strip() for l in src.read_text(errors='ignore').splitlines()
             if l.strip().startswith('#include') and '"' in l]
 
-def clean_old_asserts(path: Path):
-    src = path.read_text(errors='ignore').splitlines()
-    cleaned = [ln for ln in src if "klee_assert(" not in ln]
-    if len(cleaned) != len(src):
-        path.write_text("\n".join(cleaned))
-
-def inject_assert(path: Path, ln: int, expr: str):
-    clean_old_asserts(path)
-    lines = path.read_text(errors='ignore').splitlines()
-    if any(expr in L for L in lines):
-        return
-    insert_at = max(0, ln - 1)
-    lines.insert(insert_at, f"    klee_assert({expr});")
-    path.write_text("\n".join(lines))
-
-# ---------------------------------------------------------------- main
 def main():
-    ap = argparse.ArgumentParser("Generate driver + inject assertion")
+    ap = argparse.ArgumentParser("Generate driver only (no assertion insertion)")
     req = ap.add_argument_group("required")
-    req.add_argument("--entry-src",   required=True)
-    req.add_argument("--entry-func",  required=True)
-    req.add_argument("--vuln",        required=True)
+    req.add_argument("--entry-src", required=True)
+    req.add_argument("--entry-func", required=True)
+    req.add_argument("--vuln", required=True)
     req.add_argument("--assert-line", required=True, type=int)
-    req.add_argument("--target-src",  required=True)
-    req.add_argument("--assertion",   required=True)
+    req.add_argument("--target-src", required=True)
 
     rep = ap.add_argument_group("repeatable / optional")
     rep.add_argument("--symbolic", action='append', default=[])
@@ -81,21 +61,19 @@ def main():
 
     malloc_map = {ptr: int(sz) for ptr, sz in args.malloc}
 
-    sg_root   = Path("../stase_generated_last")
-    src_root  = sg_root / "instrumented_source"
+    sg_root = Path("../stase_generated_last")
+    src_root = sg_root / "instrumented_source"
     entry_abs = src_root / args.entry_src
-    target_abs= src_root / args.target_src
-
-    inject_assert(target_abs, args.assert_line, args.assertion)
+    target_abs = src_root / args.target_src
 
     inputs_dir = Path("../inputs"); inputs_dir.mkdir(exist_ok=True)
-    drv_path   = inputs_dir / f"klee_driver_{args.entry_func}_{args.vuln}_{args.assert_line}.c"
+    drv_path = inputs_dir / f"klee_driver_{args.entry_func}_{args.vuln}_{args.assert_line}.c"
 
-    hdrs        = local_hdrs(entry_abs)
-    pdecl, pnam = sig_info(entry_abs, args.entry_func)
+    hdrs, pnam = sig_info(entry_abs, args.entry_func)
+    pdecl, _ = sig_info(entry_abs, args.entry_func)
 
     glob_set = {d.split()[-1].lstrip('*').split('[')[0] for d in args.globals_}
-    sym_set  = {d.split()[-1].lstrip('*').split('[')[0] for d in args.symbolic}
+    sym_set = {d.split()[-1].lstrip('*').split('[')[0] for d in args.symbolic}
 
     inc_dir = target_abs.parent
 
@@ -103,22 +81,19 @@ def main():
         W = f.write
         W(f"// Auto-generated driver for {args.entry_func}\n")
 
-        # ---- EDK-II specific helpers (included only if they exist) -------------
         edk_headers = [
-            ("../stase_generated_last/global_stubs.h",      sg_root / "global_stubs.h"),
-            ("../stase_generated_last/global_stub_defs.c",  sg_root / "global_stub_defs.c"),
+            ("../stase_generated_last/global_stubs.h", sg_root / "global_stubs.h"),
+            ("../stase_generated_last/global_stub_defs.c", sg_root / "global_stub_defs.c"),
             ("../stase_generated_last/uefi_helper_stubs.c", sg_root / "uefi_helper_stubs.c")
         ]
         for inc_str, inc_path in edk_headers:
-            if inc_path.exists():                      # skip in kernel-only projects
+            if inc_path.exists():
                 W(f'#include "{inc_str}"\n')
-        # ------------------------------------------------------------------------
 
         W('#include "../stase_symex/klee/klee.h"\n')
         W('#include <string.h>\n#include <stdlib.h>\n')
 
-
-        for inc in hdrs:
+        for inc in local_hdrs(entry_abs):
             hdr = inc.split('"')[1]
             W(f'#include "{os.path.relpath((inc_dir / hdr).resolve(), drv_path.parent)}"\n')
 
@@ -135,7 +110,7 @@ def main():
         if args.symbolic:
             W('    // Symbolic variables\n')
             for decl in args.symbolic:
-                raw  = decl.split()[-1]
+                raw = decl.split()[-1]
                 base = raw.lstrip('*').replace('[', '_').replace(']', '')
                 if '[' in raw:
                     W(f'    {decl};\n')
@@ -159,7 +134,6 @@ def main():
                     else:
                         W(f'    {decl} = malloc(sizeof({base_t}));\n')
                         W(f'    klee_make_symbolic({ptr_nm}, sizeof({base_t}), "{ptr_nm}");\n')
-
                 else:
                     if raw not in glob_set:
                         W(f'    {decl};\n')
@@ -169,7 +143,9 @@ def main():
             W('\n    // Entry-point parameters (default init)\n')
             for d, n in zip(pdecl, pnam):
                 if n not in sym_set and n not in glob_set:
-                    W(f'    {d} = {"NULL" if "*" in d else "0"};\n')
+                    default_val = "NULL" if "*" in d else "0"
+                    W(f'    {d} = {default_val};\n')
+
 
         if args.concrete:
             W('\n    // Concrete initialisation / constraints\n')
@@ -182,7 +158,6 @@ def main():
 
     print(f"[✓] Driver  : {drv_path.resolve()}")
     rel_t = target_abs.relative_to(sg_root)
-    print(f"[✓] Assert  : inserted before line {args.assert_line} in {rel_t}")
 
 if __name__ == "__main__":
     main()

@@ -91,9 +91,12 @@ python3 setup_kernel_environment.py  ../eval2_linux-main /usr/lib/llvm-14/bin/cl
 ```
 
 ## **2. For Each Vulnerability**
-### **2.1 Generate Driver and Insert Assertion**
+### **2.1 Generate Driver and Instrument Code**
+- Use setup_driver.py to generate a standalone KLEE driver.
+- Use instrument.py to inject assertions, comment irrelevant code, and stub functions in the target source.
 #### 2.1  Quick reference
-Run once for each vulnerability detected by static analysis to generate a KLEE driver and insert assertion.
+Run once for each vulnerability detected by static analysis to generate a KLEE driver and instrument code.
+##### Generate KLEE Driver
 ```
 python3 setup_driver.py \
   --entry-src   <path/to/entrypoint.c>     \
@@ -101,7 +104,6 @@ python3 setup_driver.py \
   --vuln        <OOB_WRITE|WWW|CFH>        \
   --assert-line <N>                        \
   --target-src  <same/or/other/file.c>     \
-  --assertion   "<expr inside klee_assert>"\
   --symbolic    "type name"   [...]        \
   --concrete    "stmt;"       [...]        \
   --global/-g   "type name"   [...]        \
@@ -114,10 +116,18 @@ python3 setup_driver.py \
 - `--default-malloc` his option tells the system to automatically allocate a buffer of size N bytes for any double pointer (like CHAR8 **OutputBuffer) that hasn’t been manually allocated using --malloc.
 - `--global/-g` globals (visible to instrumented source).
 
-Outputs:
+Outputs: inputs/klee_driver___.c
 
-- inputs/klee_driver___.c
-- Instrumented source with assertion
+##### Instrument Source Code
+```
+python3 instrument.py \
+  --target-src <relative/path/to/source.c> \
+  --assert-line <line-number> \
+  --assertion "<klee_assert_expr>" \
+  [--comment-lines <L1> <L2> ...] \
+  [--stub-functions <func1> <func2> ...]
+```
+Outputs: Instrumented source with assertion
 
 
 #### Examples
@@ -129,7 +139,7 @@ python3 setup_driver.py \
   --vuln        OOB_WRITE \
   --assert-line 146 \
   --target-src  Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  -g           "unsigned OutputBuffer_cap" \
+  --global           "unsigned OutputBuffer_cap" \
   --symbolic   "ICONV_T *CharDesc" \
   --symbolic   "CHAR8 *InputBuffer" \
   --malloc     InputBuffer 4096 \
@@ -137,8 +147,17 @@ python3 setup_driver.py \
   --symbolic   "CHAR8 **OutputBuffer" \
   --symbolic   "INTN *OutputSize" \
   --symbolic   "unsigned OutputBuffer_cap" \
-  --concrete   "*OutputBuffer = malloc(OutputBuffer_cap);" \
-  --assertion  "OutIndex < OutputBuffer_cap"
+  --concrete   "*OutputBuffer = malloc(OutputBuffer_cap);"
+```
+
+Instrument the source: insert assertion and stub AsciiStrCmp
+```
+python3 instrument.py \
+  --target-src Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  --assert-line 146 \
+  --assertion "OutIndex < OutputBuffer_cap" \
+  --stub-functions AsciiStrCmp
+
 ```
 This harness:
 - `OutputBuffer_cap` (symbolic + global): Models the buffer size.
