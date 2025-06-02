@@ -40,11 +40,10 @@ def stub_out_missing_headers(instrumented_src: Path):
                 header_path.write_text("/* stubbed header */\n")
     print("[✓] Stubbed missing headers in instrumented_source")
 
-def write_kernel_stub_header(target_src_path: Path):
-    include_dir = target_src_path.parent / "include"
+def write_kernel_stub_header(instrumented_src: Path):
+    include_dir = instrumented_src / "include"
     include_dir.mkdir(parents=True, exist_ok=True)
-    stub_code = """\
-#ifndef __KERNEL_STUB_DEFS_H__
+    stub_code = """\n#ifndef __KERNEL_STUB_DEFS_H__
 #define __KERNEL_STUB_DEFS_H__
 
 #define pr_err(x...) do {} while (0)
@@ -52,31 +51,33 @@ def write_kernel_stub_header(target_src_path: Path):
 #define MODULE_LICENSE(x)
 #define MODULE_AUTHOR(x)
 #define MODULE_DESCRIPTION(x)
+#define module_init(x)
 #define module_exit(x)
 #define __init
 #define __exit
 
-struct notifier_block {};  // Stub for incomplete struct
+struct notifier_block {
+    int (*notifier_call)(struct notifier_block *nb, unsigned long action, void *data);
+};
 
 static inline void make_dynamic_area() {}
 static inline int is_executable(uint64_t x) { return 0; }
+static inline int usb_register_notify(struct notifier_block *nb) { return 0; }
+static inline void usb_unregister_notify(struct notifier_block *nb) {}
 
 #endif
 """
     write(include_dir / "kernel_stub_defs.h", stub_code)
-    print(f"[✓] Wrote {include_dir}/kernel_stub_defs.h")
-
-
+    print("[✓] Wrote instrumented_source/include/kernel_stub_defs.h")
 
 def prepend_stub_header(file_path: Path):
     if not file_path.exists(): return
     lines = file_path.read_text().splitlines()
-    relative_stub = f'#include "include/kernel_stub_defs.h"'
-    if relative_stub not in lines:
-        lines.insert(0, relative_stub)
+    include_line = '#include "include/kernel_stub_defs.h"'
+    if include_line not in lines:
+        lines.insert(0, include_line)
         file_path.write_text("\n".join(lines) + "\n")
         print(f"[✓] Inserted stub header in {file_path.name}")
-
 
 def comment_out_lines(target_file: Path, line_nums: list):
     lines = target_file.read_text().splitlines()
@@ -122,9 +123,7 @@ def main():
 
     preserved_paths = {args.target_src, args.entry_src, *args.helper_files}
     copy_preserved_files(original_src, instrumented_src, preserved_paths)
-    write_kernel_stub_header(instrumented_src / args.target_src)
-
-
+    write_kernel_stub_header(instrumented_src)
 
     for rel_path in preserved_paths:
         file = instrumented_src / rel_path

@@ -86,17 +86,42 @@ The static analysis output contains JSON files. Each JSON represents a potential
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
 ```
-python3 setup_edk2_environment.py <source-code-location> <clang-path> <klee-path>
+python3 setup_edk2_environment.py <source-code-location>
 ```
 Example:
 ```
 # from stase_symex/
-python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
+python3 setup_edk2_environment.py ../edk2-testcases-main 
 ```
 
 ## **2. Driver and Instrumentation (For Each Vulnerability)**
-- Use setup_driver.py to generate a standalone KLEE driver.
 - Use instrument.py to inject assertions, comment irrelevant code, and stub functions in the target source.
+- Use setup_driver.py to generate a standalone KLEE driver.
+
+### Instrument Source Code
+```
+python3 instrument.py \
+  --target-src <relative/path/to/source.c> \
+  --assert-line <line-number> \
+  --assertion "<klee_assert_expr>" \
+  [--comment-lines <L1> <L2> ...] \
+  [--stub-functions <func1> <func2> ...]
+```
+Outputs: Instrumented source with assertion
+
+Example:
+```
+python3 instrument.py \
+  --target-src Testcases/Sample2Tests/CharConverter/CharConverter.c \
+  --assert-line 146 \
+  --assertion "OutIndex < OutputBuffer_cap" \
+  --stub-functions AsciiStrCmp
+
+```
+Outputs:
+```
+stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
+```
 
 ### Generate KLEE Driver
 `setup_driver.py` Usage:
@@ -145,30 +170,7 @@ Outputs:
 inputs/klee_driver_Iconv_OOB_WRITE_146.c
 ```
 
-### Instrument Source Code
-```
-python3 instrument.py \
-  --target-src <relative/path/to/source.c> \
-  --assert-line <line-number> \
-  --assertion "<klee_assert_expr>" \
-  [--comment-lines <L1> <L2> ...] \
-  [--stub-functions <func1> <func2> ...]
-```
-Outputs: Instrumented source with assertion
 
-Example:
-```
-python3 instrument.py \
-  --target-src Testcases/Sample2Tests/CharConverter/CharConverter.c \
-  --assert-line 146 \
-  --assertion "OutIndex < OutputBuffer_cap" \
-  --stub-functions AsciiStrCmp
-
-```
-Outputs:
-```
-stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
-```
 This harness:
 - `OutputBuffer_cap` (symbolic + global): Models the buffer size.
 - `*OutputBuffer = malloc(OutputBuffer_cap)`;: Allocates a concrete buffer of symbolic size.
@@ -181,17 +183,17 @@ Once the driver and assertion are ready:
 
 ### Single Driver
 ```
-python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
+python3 run_analysis.py <driver.c> --clang-path <clang> --klee-path <klee> [--timeout <max_klee_time_seconds>]
 ```
 
 Example:
 ```
-python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c 
+python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c  --clang-path /usr/lib/llvm-14/bin/clang   --klee-path /home/shafi/klee_build/bin/klee
 ```
 
 ###  Batch Mode (all drivers under inputs/)
 ```
-python3 run_analysis.py --batch
+python3 run_analysis.py --batch --clang-path <clang> --klee-path <klee> [--timeout <max_klee_time_seconds>]
 ```
 Output appears under `stase_generated/klee-out-*`
 
@@ -224,15 +226,43 @@ Symbolic execution may not always succeed without minor guidance. Use the table 
 # STASE SYMEX: Linux Kernel Workflow
 ## **1. Environment Setup (One Time Only)**
 ```
-python3 setup_kernel_environment.py <kernel-src> <clang> <klee>
+python3 setup_kernel_environment.py <kernel-src>
 ```
 Example:
 ```
 # from stase_symex/
-python3 setup_kernel_environment.py  ../eval2_linux-main /usr/lib/llvm-14/bin/clang   /home/shafi/klee_build/bin/klee
+python3 setup_kernel_environment.py  ../eval2_linux-main 
 ```
 ## **2. Driver and Instrumentation (For Each Vulnerability)**
 
+
+
+### Instrument Source Code
+```
+python3 instrument_kernel.py \
+  --target-src <relative/path/to/source.c> \         # C file where assertion will be inserted
+  --assert-line <line-number> \                      # Line number to insert the assertion (before this line)
+  --assertion "<klee_assert_expr>" \                 # The assertion to insert (must be a valid C statement)
+  [--comment-lines <L1> <L2> ...] \                   # Optional: lines to comment out instead of deleting
+  [--helper-files <file1.c> <file2.c> ...] \          # Optional: preserve these extra C files (e.g., entrypoint helpers)
+  [--stub-functions <stubs.json>]                    # Optional: JSON file of stubbed function definitions
+
+```
+Output: A new workspace under ../stase_generated_<N>/ with:
+
+    - An instrumented version of the kernel source in instrumented_source/,
+    - Inserted assertion at the specified location,
+    - Stubbed-out irrelevant .c files,
+    - A generated driver_stubs.c file if --stub-functions is provided.
+
+Example:
+```
+python3 instrument_kernel.py \
+   --entry-src   drivers/kbmi_net/kbmi_net.c \
+  --target-src drivers/kbmi_usb/kbmi_usb.c \
+  --assert-line 79 \
+  --assertion 'klee_assert(!is_executable((uint64_t)message_buffer));'
+```
 ### Generate KLEE Driver
 `setup_driver.py` Usage:
 
@@ -267,51 +297,23 @@ inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c
 ```
 
 
-### Instrument Source Code
-```
-python3 instrument_kernel.py \
-  --target-src <relative/path/to/source.c> \         # C file where assertion will be inserted
-  --assert-line <line-number> \                      # Line number to insert the assertion (before this line)
-  --assertion "<klee_assert_expr>" \                 # The assertion to insert (must be a valid C statement)
-  [--comment-lines <L1> <L2> ...] \                   # Optional: lines to comment out instead of deleting
-  [--helper-files <file1.c> <file2.c> ...] \          # Optional: preserve these extra C files (e.g., entrypoint helpers)
-  [--stub-functions <stubs.json>]                    # Optional: JSON file of stubbed function definitions
-
-```
-Output: A new workspace under ../stase_generated_<N>/ with:
-
-    - An instrumented version of the kernel source in instrumented_source/,
-    - Inserted assertion at the specified location,
-    - Stubbed-out irrelevant .c files,
-    - A generated driver_stubs.c file if --stub-functions is provided.
-
-Example:
-```
-python3 instrument_kernel.py \
-   --entry-src   drivers/kbmi_net/kbmi_net.c \
-  --target-src drivers/kbmi_usb/kbmi_usb.c \
-  --assert-line 79 \
-  --assertion 'klee_assert(!is_executable((uint64_t)message_buffer));'
-```
-Outputs:
-
 ## **3. Run Analysis**
 
 Once the driver and assertion are ready:
 
 ### Single Driver
 ```
-python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
+python3 run_analysis.py <driver.c> --clang-path <clang> --klee-path <klee> [--timeout <max_klee_time_seconds>]
 ```
 
 Example:
 ```
-python3 run_analysis.py ../inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c 
+python3 run_analysis.py ../inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c  --clang-path /usr/lib/llvm-14/bin/clang   --klee-path /home/shafi/klee_build/bin/klee
 ```
 
 ###  Batch Mode (all drivers under inputs/)
 ```
-python3 run_analysis.py --batch
+python3 run_analysis.py --batch --clang-path <clang> --klee-path <klee> [--timeout <max_klee_time_seconds>]
 ```
 Output appears under `stase_generated/klee-out-*`
 
