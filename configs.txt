@@ -1,0 +1,20 @@
+stase_symex/
+python3 setup_edk2_environment.py ../eval3_edk2-main
+
+proj="../eval3_edk2-main" && find "$proj" -type f \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) -exec sed -i -E 's@^[[:space:]]*#include[[:space:]]+<Register/Intel/[^>]+>@// &@' {} +
+
+
+python3 instrument.py \
+  --target-src UefiCpuPkg/PiSmmCpuDxeSmm/SmmLegacy.c \
+  --assert-line 42 \
+  --assertion '((Attribute & EFI_MEMORY_XP) == 0) /* If EFI_MEMORY_XP is set here, ClearMemoryAttributes would remove it, leaving the stack writable + executable */' \
+  --stub-functions DisableReadOnlyPageWriteProtect EnableReadOnlyPageWriteProtect
+  
+
+python3 run_analysis.py ../inputs/klee_driver_SmmLegacyMmiHandler_STACK_EXEC_42.c  --clang-path /usr/lib/llvm-14/bin/clang   --klee-path /home/shafi/klee_build/bin/klee
+
+
+
+
+
+
