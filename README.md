@@ -269,21 +269,29 @@ inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c
 
 ### Instrument Source Code
 ```
-python3 instrument.py \
-  --target-src <relative/path/to/source.c> \
-  --assert-line <line-number> \
-  --assertion "<klee_assert_expr>" \
-  [--comment-lines <L1> <L2> ...] \
-  [--stub-functions <func1> <func2> ...]
+python3 instrument_kernel.py \
+  --target-src <relative/path/to/source.c> \         # C file where assertion will be inserted
+  --assert-line <line-number> \                      # Line number to insert the assertion (before this line)
+  --assertion "<klee_assert_expr>" \                 # The assertion to insert (must be a valid C statement)
+  [--comment-lines <L1> <L2> ...] \                   # Optional: lines to comment out instead of deleting
+  [--helper-files <file1.c> <file2.c> ...] \          # Optional: preserve these extra C files (e.g., entrypoint helpers)
+  [--stub-functions <stubs.json>]                    # Optional: JSON file of stubbed function definitions
+
 ```
-Outputs: Instrumented source with assertion
+Output: A new workspace under ../stase_generated_<N>/ with:
+
+    - An instrumented version of the kernel source in instrumented_source/,
+    - Inserted assertion at the specified location,
+    - Stubbed-out irrelevant .c files,
+    - A generated driver_stubs.c file if --stub-functions is provided.
 
 Example:
 ```
 python3 instrument_kernel.py \
+   --entry-src   drivers/kbmi_net/kbmi_net.c \
   --target-src drivers/kbmi_usb/kbmi_usb.c \
   --assert-line 79 \
-  --assertion "\!is_executable((uint64_t)message_buffer)"
+  --assertion 'klee_assert(!is_executable((uint64_t)message_buffer));'
 ```
 Outputs:
 
