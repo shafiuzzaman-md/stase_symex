@@ -62,76 +62,67 @@ STASE_SYMEX combines static-analysis results with KLEE-based symbolic execution 
 | **`formatted_output/*.json`**   | JSON | Machine-parseable bug report (type, file, line, variables, assertion, precondition|
 
 ---
-## Step 0: Install KLEE Symbolic Execution Engine 
+# KLEE Symbolic Execution Engine Installation
 STASE uses KLEE as the underlying symbolic execution engine. Follow [these steps](install_klee.md) to install KLEE.
 
-## **1. Setup (One Time Only)**
+# Static Analysis Integration
+
+The static analysis output contains JSON files. Each JSON represents a potential vulnerability.
+
+## Mapping Static Analysis Fields to `setup_driver.py` Inputs
+| JSON Field       | `setup_driver.py` Argument       | Description                             |
+|------------------|----------------------------------|-----------------------------------------|
+| `Taint Source`   | `--entry-src`, `--entry-func`    | Entry function and its source file      |
+| `Taint Sink`     | `--target-src`                   | File where assertion should be inserted |
+| `Source`         | `--symbolic`                     | Tainted variable to make symbolic       |
+| `Destination`    | `--assertion`                    | Used in klee_assert expression          |
+| `Program Location` | `--assert-line`                | Line number for assertion insertion     |
+
+
+# STASE SYMEX: UEFI Firmware Workflow
+
+## **1. Environment Setup (One Time Only)**
 
 Run **once** to set up the environment and prepare environment-wide stubs and includes.
 
-### edk2:
 ```
 python3 setup_edk2_environment.py <source-code-location> <clang-path> <klee-path>
 ```
-### kernel:
-```
-python3 setup_kernel_environment.py <source-code-location> <clang-path> <klee-path>
-```
-
-Example on EDK II:
+Example:
 ```
 # from stase_symex/
 python3 setup_edk2_environment.py ../edk2-testcases-main /usr/lib/llvm-14/bin/clang /home/shafi/klee_build/bin/klee
 ```
-Example on kernel:
-```
-# from stase_symex/
-python3 setup_kernel_environment.py  ../eval2_linux-main /usr/lib/llvm-14/bin/clang   /home/shafi/klee_build/bin/klee
 
-```
-
-## **2. For Each Vulnerability**
-### **2.1 Generate Driver and Instrument Code**
+## **2. Driver and Instrumentation (For Each Vulnerability)**
 - Use setup_driver.py to generate a standalone KLEE driver.
 - Use instrument.py to inject assertions, comment irrelevant code, and stub functions in the target source.
-#### 2.1  Quick reference
-Run once for each vulnerability detected by static analysis to generate a KLEE driver and instrument code.
-##### Generate KLEE Driver
+
+### Generate KLEE Driver
+`setup_driver.py` Usage:
+
+Mandatory Flags
+```bash
+--entry-src    <rel-path>     # Source file containing entry point
+--entry-func   <symbol>       # Entry function name (e.g., Iconv)
+--vuln         <OOB_WRITE|WWW|CFH>
+--assert-line  <line-number>  # Insert assertion before this line
+--target-src   <rel-path>     # File where vulnerability lies
+--assertion    "<expr>"       # klee_assert expression
 ```
-python3 setup_driver.py \
-  --entry-src   <path/to/entrypoint.c>     \
-  --entry-func  <EntryPointSymbol>         \
-  --vuln        <OOB_WRITE|WWW|CFH>        \
-  --assert-line <N>                        \
-  --target-src  <same/or/other/file.c>     \
-  --symbolic    "type name"   [...]        \
-  --concrete    "stmt;"       [...]        \
-  --global/-g   "type name"   [...]        \
-  --malloc      "ptr size"    [...]        \
-  --default-malloc <size|0>
+Optional Flags
+```bash
+--symbolic      "type name"       # Symbolic variable in main()
+--concrete      "stmt;"           # Concrete init code inside main()
+--global        "type name"       # File-scope globals before main()
+--malloc        PTR SZ            # Allocate buffer for T** manually
+--default-malloc <size|0>         # Default size for T** allocations
 ```
-- `--symbolic` Declares and makes variables symbolic
-- `--concrete` Adds explicit initialization (malloc, assume, etc.)
-- `--malloc` Pre-allocates symbolic buffer for double pointers
-- `--default-malloc` his option tells the system to automatically allocate a buffer of size N bytes for any double pointer (like CHAR8 **OutputBuffer) that hasn’t been manually allocated using --malloc.
-- `--global/-g` globals (visible to instrumented source).
+
 
 Outputs: inputs/klee_driver___.c
 
-##### Instrument Source Code
-```
-python3 instrument.py \
-  --target-src <relative/path/to/source.c> \
-  --assert-line <line-number> \
-  --assertion "<klee_assert_expr>" \
-  [--comment-lines <L1> <L2> ...] \
-  [--stub-functions <func1> <func2> ...]
-```
-Outputs: Instrumented source with assertion
-
-
-#### Examples
-##### 2.2.1  Iconv OOB_WRITE
+Example:
 ```
 python3 setup_driver.py \
   --entry-src   Testcases/Sample2Tests/CharConverter/CharConverter.c \
@@ -149,8 +140,23 @@ python3 setup_driver.py \
   --symbolic   "unsigned OutputBuffer_cap" \
   --concrete   "*OutputBuffer = malloc(OutputBuffer_cap);"
 ```
+Outputs:
+```
+inputs/klee_driver_Iconv_OOB_WRITE_146.c
+```
 
-Instrument the source: insert assertion and stub AsciiStrCmp
+### Instrument Source Code
+```
+python3 instrument.py \
+  --target-src <relative/path/to/source.c> \
+  --assert-line <line-number> \
+  --assertion "<klee_assert_expr>" \
+  [--comment-lines <L1> <L2> ...] \
+  [--stub-functions <func1> <func2> ...]
+```
+Outputs: Instrumented source with assertion
+
+Example:
 ```
 python3 instrument.py \
   --target-src Testcases/Sample2Tests/CharConverter/CharConverter.c \
@@ -159,56 +165,37 @@ python3 instrument.py \
   --stub-functions AsciiStrCmp
 
 ```
+Outputs:
+```
+stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
+```
 This harness:
 - `OutputBuffer_cap` (symbolic + global): Models the buffer size.
 - `*OutputBuffer = malloc(OutputBuffer_cap)`;: Allocates a concrete buffer of symbolic size.
 - `--malloc InputBuffer 4096`: Ensures the input read (e.g., InputBuffer[i+1]) stays in bounds.
 - Asserts write bound to prevent OOB at `(*OutputBuffer)[OutIndex++]`
 
-Results:
-```
-inputs/klee_driver_Iconv_OOB_WRITE_146.c
-stase_generated/instrumented_source/.../CharConverter.c   (now contains klee_assert)
-```
-
-##### 2.2.2  kbmi_net Stack STACK_EXECUTABLE
-```
-python3 setup_driver.py \
-  --entry-src   drivers/kbmi_net/kbmi_net.c \
-  --entry-func  kbmi_net_init \
-  --vuln        STACK_EXECUTABLE \
-  --assert-line 79 \
-  --target-src  drivers/kbmi_usb/kbmi_usb.c \
-  -g           "#define NOTIFY_OK 0" \
-  -g           "char message_buffer[1024]" \
-  --symbolic   "char message_buffer[MESSAGE_SIZE]" \
-  --assertion  "0"
-```
-
-### Step 3: Run Analysis
+## **3. Run Analysis**
 
 Once the driver and assertion are ready:
 
-#### Single Driver
+### Single Driver
 ```
 python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
-
 ```
 
 Example:
 ```
 python3 run_analysis.py ../inputs/klee_driver_Iconv_OOB_WRITE_146.c 
-python3 run_analysis.py ../inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c 
 ```
 
-####  Batch Mode (all drivers under inputs/)
+###  Batch Mode (all drivers under inputs/)
 ```
 python3 run_analysis.py --batch
-
 ```
 Output appears under `stase_generated/klee-out-*`
 
-#### Output:
+### Output:
 ``` cd .. ```
 - `stase_output/*.txt`
 - `formatted_output/*.json`
@@ -225,7 +212,7 @@ Example JSON Output
 }
 ```
 
-### Step 4: Human-in-the-loop edits (if needed)
+## **4. Human-in-the-loop edits (if needed)**
 Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and re‑run Step 3  (run_analysis.py) when needed:
 
 | Scenario                                                  | Action| 
@@ -234,7 +221,119 @@ Symbolic execution may not always succeed without minor guidance. Use the table 
 |KLEE finishes instantly  | Loosen constraints: widen assumptions, add more symbolic inputs.|
 |KLEE runs indefinitely | Likely due to path explosion. Stub out irrelevant functions, Harden constraints: narrow assumptions, limit malloc sizes |
 
-##  Project Layout
+# STASE SYMEX: Linux Kernel Workflow
+## **1. Environment Setup (One Time Only)**
+```
+python3 setup_kernel_environment.py <kernel-src> <clang> <klee>
+```
+Example:
+```
+# from stase_symex/
+python3 setup_kernel_environment.py  ../eval2_linux-main /usr/lib/llvm-14/bin/clang   /home/shafi/klee_build/bin/klee
+```
+## **2. Driver and Instrumentation (For Each Vulnerability)**
+
+### Generate KLEE Driver
+`setup_driver.py` Usage:
+
+Mandatory Flags
+```bash
+--entry-src    <rel-path>     # Source file containing entry point
+--entry-func   <symbol>       # Entry function name (e.g., Iconv)
+--vuln         <OOB_WRITE|WWW|CFH>
+--assert-line  <line-number>  # Insert assertion before this line
+--target-src   <rel-path>     # File where vulnerability lies
+--assertion    "<expr>"       # klee_assert expression
+```
+Optional Flags
+```bash
+--symbolic      "type name"       # Symbolic variable in main()
+--concrete      "stmt;"           # Concrete init code inside main()
+--global        "type name"       # File-scope globals before main()
+--malloc        PTR SZ            # Allocate buffer for T** manually
+--default-malloc <size|0>         # Default size for T** allocations
+```
+
+Outputs: inputs/klee_driver___.c
+
+Example:
+```
+python3 setup_driver.py   --entry-src   drivers/kbmi_net/kbmi_net.c   --entry-func  kbmi_net_init   --vuln        STACK_EXECUTABLE   --assert-line 79   --target-src  drivers/kbmi_usb/kbmi_usb.c   --global      "#define NOTIFY_OK 0"   --global      "char message_buffer[1024]"   --symbolic    "char message_buffer[MESSAGE_SIZE]"
+```
+
+Outputs:
+```
+inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c
+```
+
+
+### Instrument Source Code
+```
+python3 instrument.py \
+  --target-src <relative/path/to/source.c> \
+  --assert-line <line-number> \
+  --assertion "<klee_assert_expr>" \
+  [--comment-lines <L1> <L2> ...] \
+  [--stub-functions <func1> <func2> ...]
+```
+Outputs: Instrumented source with assertion
+
+Example:
+```
+python3 instrument_kernel.py \
+  --target-src drivers/kbmi_usb/kbmi_usb.c \
+  --assert-line 79 \
+  --assertion "\!is_executable((uint64_t)message_buffer)"
+```
+Outputs:
+
+## **3. Run Analysis**
+
+Once the driver and assertion are ready:
+
+### Single Driver
+```
+python3 run_analysis.py <driver.c> [<max_klee_time_seconds>]
+```
+
+Example:
+```
+python3 run_analysis.py ../inputs/klee_driver_kbmi_net_init_STACK_EXECUTABLE_79.c 
+```
+
+###  Batch Mode (all drivers under inputs/)
+```
+python3 run_analysis.py --batch
+```
+Output appears under `stase_generated/klee-out-*`
+
+### Output:
+``` cd .. ```
+- `stase_output/*.txt`
+- `formatted_output/*.json`
+
+## **4. Human-in-the-loop edits (if needed)**
+Symbolic execution may not always succeed without minor guidance. Use the table below to adjust and re‑run Step 3  (run_analysis.py) when needed:
+
+| Scenario                                                  | Action| 
+|-----------------------------------------------------------|------ |
+|KLEE: ERROR – `undefined reference`| Add stubs for missing external or platform-specific functions.|
+|KLEE finishes instantly  | Loosen constraints: widen assumptions, add more symbolic inputs.|
+|KLEE runs indefinitely | Likely due to path explosion. Stub out irrelevant functions, Harden constraints: narrow assumptions, limit malloc sizes |
+
+# Adding a New Environment
+To support a new environment:
+1. Create `setup_<env>_environment.py` (e.g., `setup_android_environment.py`)
+2. Use common helper functions:
+   - `next_workspace()` to create new workspace
+   - `write_settings_py()` / `write_settings_json()` to emit tool paths
+   - `copy_source_tree()` to copy sources if needed
+3. Stub missing headers using `emit_fake_libc()` pattern
+4. Ensure `instrumented_source/` is populated or structured properly
+
+
+
+#  Project Layout
 ```
 project_root/
 ├── stase_symex/
